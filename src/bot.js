@@ -1,0 +1,157 @@
+const { Telegraf } = require('telegraf');
+const express = require('express');
+const config = require('./config');
+const state = require('./state');
+const cronJobs = require('./cron');
+
+const General = require('./controllers/general');
+const Tasks = require('./controllers/tasks');
+const Shopping = require('./controllers/shopping');
+const Thoughts = require('./controllers/thoughts');
+const Finance = require('./controllers/finance');
+const Weight = require('./controllers/weight');
+const Habits = require('./controllers/habits');
+const Plan = require('./controllers/plan');
+const Settings = require('./controllers/settings');
+
+const bot = new Telegraf(config.TELEGRAM_TOKEN);
+const app = express();
+
+const isPrivate = (ctx) => ctx.chat.type === 'private';
+
+bot.use(async (ctx, next) => {
+  const userId = ctx.from?.id;
+  if (config.USERS[userId]) {
+    ctx.userConfig = config.USERS[userId];
+    return next();
+  }
+  if (ctx.chat.id.toString() === config.CHAT_HQ_ID) return next();
+});
+
+// --- MENU TRIGGERS ---
+const trigger = (text, handler) => {
+  bot.hears(text, async (ctx) => {
+    try { await ctx.deleteMessage(); } catch (e) { }
+    await handler(ctx);
+  });
+};
+
+bot.hears('⚖️ Вес', (ctx) => {
+  if (!isPrivate(ctx)) return ctx.reply('🔒 Взвешиваемся только в личке!');
+  Weight.start(ctx);
+});
+
+bot.hears('✅ Привычки', (ctx) => {
+  if (!isPrivate(ctx)) return ctx.reply('🔒 Привычки — дело личное.');
+  Habits.menu(ctx);
+});
+
+// ТРИГГЕРЫ
+trigger('❓ Помощь', General.help);
+trigger('📊 Отчеты', General.reportMenu);
+trigger('⚙️ Конфиг', Settings.menu);
+trigger('📝 Задачи', Tasks.menu);
+trigger('🛒 Покупки', Shopping.menu);
+trigger('💸 Расходы', Finance.startSpent);
+trigger('⚖️ Вес', Weight.start);
+trigger('✅ Привычки', Habits.menu);
+trigger('📝 В планы', Plan.start);
+trigger('💡 Мысли', Thoughts.start);
+trigger(['📅 Сегодня', '🗓 Завтра'], General.schedule);
+
+bot.start(General.start);
+
+// --- ACTIONS ---
+bot.action('close_menu', async (ctx) => {
+  try { await ctx.deleteMessage(); } catch (e) { }
+  await ctx.answerCbQuery();
+});
+
+bot.action('cancel_scene', async (ctx) => {
+  const { clearChat } = require('./utils/helpers');
+  await clearChat(ctx);
+  try { await ctx.deleteMessage(); } catch (e) { }
+  await ctx.answerCbQuery('Отменено');
+});
+
+// Отчеты
+bot.action('rep_finance', Finance.report);
+bot.action('rep_weight', Weight.report);
+bot.action('rep_habits', Habits.report);
+
+// Настройки
+bot.action(/set_toggle_(.+)/, Settings.toggle);
+bot.action(/set_ask_(.+)/, Settings.askTime);
+
+// Задачи
+bot.action('task_add', Tasks.startAdd);
+bot.action('task_list', Tasks.list);
+bot.action(/^task_manage_(\d+)$/, Tasks.manage);
+bot.action('task_done', Tasks.done);
+bot.action('task_plan', Plan.startFromTask);
+bot.action('open_tasks', Tasks.menu);
+
+// Покупки
+bot.action('open_shopping', Shopping.menu);
+bot.action('shop_add', Shopping.startAdd);
+bot.action('shop_list', Shopping.list);
+bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
+
+// Финансы
+bot.action(/^cat_(.+)/, Finance.actionCategory);
+
+// Привычки
+bot.action(/^habit_toggle_(.+)/, Habits.toggle);
+bot.action('habit_add_new', Habits.startAdd);
+bot.action('habit_del_menu', Habits.deleteMenu);
+bot.action(/^habit_delete_(.+)/, Habits.deleteAction);
+bot.action('habit_chart', Habits.report);
+bot.action('habit_back', Habits.menu);
+
+// --- TEXT ---
+bot.on('text', async (ctx) => {
+  const s = state.get(ctx.from.id);
+  const scene = s?.scene;
+  if (!scene) return;
+
+  if ((scene === 'WEIGHT' || scene === 'HABIT_ADD') && !isPrivate(ctx)) {
+    state.clear(ctx.from.id);
+    return ctx.reply('🔒 Это только для личного чата.');
+  }
+
+  state.addMsgToDelete(ctx.from.id, ctx.message.message_id);
+
+  if (scene === 'TASK_ADD') return Tasks.handleText(ctx);
+  if (scene === 'SHOP_ADD') return Shopping.handleText(ctx);
+  if (scene === 'THOUGHT_ADD') return Thoughts.handleText(ctx);
+  if (scene === 'WEIGHT') return Weight.handleText(ctx);
+  if (scene === 'SPENT_AMOUNT' || scene === 'SPENT_CATEGORY') return Finance.handleText(ctx);
+  if (scene === 'PLAN_DATE' || scene === 'PLAN_DATE_FROM_TASK') return Plan.handleText(ctx);
+  if (scene === 'SET_TIME') return Settings.handleText(ctx);
+  if (scene === 'HABIT_ADD') return Habits.handleText(ctx);
+});
+
+// --- ЗАПУСК (ЭТОГО НЕ БЫЛО) ---
+(async () => {
+  try {
+    // 1. Загружаем настройки из Google (минуты крона, привычки)
+    await Settings.init();
+
+    // 2. Запускаем крон (уже с загруженными настройками)
+    cronJobs.init(bot);
+
+    // 3. Запускаем бота
+    bot.launch().then(() => {
+      console.log('✅ AndanaBot V6 Running');
+    });
+
+    // 4. Запускаем сервер (для Render)
+    app.listen(config.PORT, () => console.log(`🌍 Web Server running on port ${config.PORT}`));
+  } catch (e) {
+    console.error('❌ Startup failed:', e);
+  }
+})();
+
+// Graceful Stop
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
