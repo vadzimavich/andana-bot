@@ -4,9 +4,18 @@ const state = require('../state');
 const keyboards = require('../keyboards');
 const { clearChat } = require('../utils/helpers');
 
+// Хелпер для безопасного удаления
+const safeDelete = async (ctx) => {
+  try {
+    await ctx.deleteMessage();
+  } catch (e) {
+    // Игнорируем ошибку, если сообщения уже нет
+  }
+};
+
 module.exports = {
   async menu(ctx) {
-    try { await ctx.deleteMessage(); } catch (e) { }
+    await safeDelete(ctx);
     await clearChat(ctx);
 
     const rows = await google.getSheetData('Inbox', 'A:D'); // Date, User, Task, Status
@@ -37,8 +46,7 @@ module.exports = {
   },
 
   async startAdd(ctx) {
-    // Тут удаление НУЖНО, так как это callback
-    try { await ctx.deleteMessage(); } catch (e) { }
+    await safeDelete(ctx);
     state.set(ctx.from.id, { scene: 'TASK_ADD', msgs: [] });
     const m = await ctx.reply('Напиши задачу:', keyboards.CancelButton);
     state.addMsgToDelete(ctx.from.id, m.message_id);
@@ -55,14 +63,13 @@ module.exports = {
   },
 
   async list(ctx) {
-    try { await ctx.deleteMessage(); } catch (e) { }
+    await safeDelete(ctx);
 
     const rows = await google.getSheetData('Inbox', 'A:D');
     const tasks = rows.map((r, i) => ({ ...r, index: i + 1 }))
       .filter(r => r[1] === ctx.userConfig.name && r[3] !== 'Done' && r[3] !== 'Scheduled');
 
     if (!tasks.length) {
-      // Если задач нет, возвращаемся в меню
       return module.exports.menu(ctx);
     }
 
@@ -80,13 +87,13 @@ module.exports = {
 
     state.set(ctx.from.id, { currentTaskRow: rowIndex, currentTaskText: text });
 
-    try { await ctx.deleteMessage(); } catch (e) { }
+    // ВОТ ЗДЕСЬ БЫЛА ОШИБКА: Если safeDelete не использовался, бот падал
+    await safeDelete(ctx);
 
-    await ctx.deleteMessage(); // Удаляем список
     const m = await ctx.reply(`📌 "${text}"\nЧто делаем?`, Markup.inlineKeyboard([
       [Markup.button.callback('✅ Выполнено', 'task_done')],
       [Markup.button.callback('📅 В план', 'task_plan')],
-      [Markup.button.callback('🔙 Назад', 'task_list')] // Возврат к списку
+      [Markup.button.callback('🔙 Назад', 'task_list')]
     ]));
     state.addMsgToDelete(ctx.from.id, m.message_id);
   },
@@ -96,7 +103,12 @@ module.exports = {
     if (!s || !s.currentTaskRow) return ctx.reply('Ошибка контекста', keyboards.MainMenu);
 
     await google.updateCell('Inbox', `D${s.currentTaskRow}`, 'Done');
-    await clearChat(ctx); // Удаляем меню задачи
-    ctx.reply(`✅ Выполнено: "${s.currentTaskText}"`, keyboards.MainMenu);
-  },
+
+    // Чистим чат от меню задачи
+    await clearChat(ctx);
+
+    // Уведомление и возврат к списку кнопок
+    await ctx.reply(`✅ Выполнено: "${s.currentTaskText}"`);
+    setTimeout(() => module.exports.list(ctx), 500);
+  }
 };
