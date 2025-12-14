@@ -31,7 +31,8 @@ module.exports = {
         [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
         [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
         [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('👗 Одежда', 'cat_Одежда')],
-        [Markup.button.callback('📦 Другое', 'cat_Разное')]
+        [Markup.button.callback('💅 Уход и красота', 'cat_Уход и красота'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
+        [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
       ]));
       state.addMsgToDelete(ctx.from.id, m.message_id);
       return;
