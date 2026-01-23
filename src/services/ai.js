@@ -4,7 +4,7 @@ const axios = require('axios');
 
 const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : null;
 
-// --- ОТЛАДКА: ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ ---
+// --- ОТЛАДКА ---
 async function getAvailableModels() {
   if (!config.GEMINI_KEY) return "Нет API ключа";
   try {
@@ -12,7 +12,7 @@ async function getAvailableModels() {
     const res = await axios.get(url);
     return res.data.models.map(m => m.name).join('\n');
   } catch (e) {
-    return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}\n(Скорее всего, регион сервера заблокирован)`;
+    return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}`;
   }
 }
 
@@ -23,8 +23,8 @@ async function parseReceipt(imageUrl) {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
 
-    // Используем самую свежую и легкую модель
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // ИСПОЛЬЗУЕМ МОДЕЛЬ ИЗ ТВОЕГО СПИСКА (Gemini 2.0 Flash)
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const prompt = `
             Проанализируй чек.
