@@ -106,6 +106,8 @@ bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
 
 bot.action(/^cat_(.+)/, Finance.actionCategory);
 
+bot.command('models', Finance.debugModels);
+
 // --- TEXT ---
 bot.on('text', async (ctx) => {
   const s = state.get(ctx.from.id);
