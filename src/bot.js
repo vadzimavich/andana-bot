@@ -70,6 +70,25 @@ trigger('⚖️ Вес', Weight.start);
 trigger('📝 В планы', Plan.start);
 trigger('💡 Мысли', Thoughts.start);
 trigger(['📅 Сегодня', '🗓 Завтра'], General.schedule);
+trigger('📋 Меню темы', async (ctx) => {
+  const topicId = ctx.message.message_thread_id;
+  const type = Settings.getTopicType(topicId);
+
+  let text = "Добро пожаловать в тему!";
+  let buttons = [];
+
+  if (type === 'expenses') {
+    text = "💸 *Тема: Расходы*\n\n• Просто пиши число (напр. 25.5)\n• Пиши число и категорию (25 еда)\n• Скидывай фото чека или QR\n• Команда /undo удалит последнюю запись";
+    buttons = [[Markup.button.callback('📊 Отчет за месяц', 'rep_finance')]];
+  }
+
+  if (type === 'shopping') {
+    text = "🛒 *Тема: Покупки*\n\n• Пиши товары через запятую\n• Команда /undo удалит последний товар";
+    buttons = [[Markup.button.callback('📋 Показать список', 'shop_list')]];
+  }
+
+  ctx.replyWithMarkdown(text, Markup.inlineKeyboard(buttons));
+});
 
 bot.start(General.start);
 
@@ -80,10 +99,10 @@ bot.action('close_menu', async (ctx) => {
 });
 
 bot.action('cancel_scene', async (ctx) => {
-  const { clearChat } = require('./utils/helpers');
   await clearChat(ctx);
   try { await ctx.deleteMessage(); } catch (e) { }
-  await ctx.answerCbQuery('Отменено');
+  // ВОЗВРАЩАЕМ МЕНЮ
+  await ctx.reply('Возврат в меню', keyboards.MainMenu);
 });
 
 bot.action('rep_finance', Finance.report);

@@ -7,9 +7,6 @@ const keyboards = require('../keyboards');
 const { clearChat } = require('../utils/helpers');
 
 module.exports = {
-  // async handleTopicMessage(ctx) {
-
-  // },
 
   async startSpent(ctx) {
     try { await ctx.deleteMessage(); } catch (e) { }
@@ -135,38 +132,48 @@ module.exports = {
   },
 
   async handleTopicMessage(ctx) {
-    const text = ctx.message.text;
+    const text = ctx.message.text || ctx.message.caption || '';
     const photo = ctx.message.photo;
+
+    // 1. Ищем УИ в тексте (1F13981C951B985B07185FB6)
+    const uiMatch = text.match(/[A-F0-9]{24}/);
+    if (uiMatch) {
+      const data = await parseIkassa(uiMatch[0]);
+      if (data) return this.saveParsedReceipt(ctx, data);
+    }
+
+    // 2. Если фото — пробуем найти QR
+    if (photo) {
+      const m = await ctx.reply('🔍 Проверяю QR-код и текст...');
+      const fileId = photo[photo.length - 1].file_id;
+      const link = await ctx.telegram.getFileLink(fileId);
+
+      try {
+        // Читаем QR через Jimp + jsQR
+        const img = await jimp.read(link.href);
+        const qr = jsqr(img.bitmap.data, img.bitmap.width, img.bitmap.height);
+
+        if (qr && qr.data.includes('ikassa')) {
+          const ui = qr.data.split('/').pop();
+          const data = await parseIkassa(ui);
+          if (data) {
+            await ctx.deleteMessage(m.message_id);
+            return this.saveParsedReceipt(ctx, data);
+          }
+        }
+      } catch (e) { console.log('QR Scan error:', e.message); }
+
+      // 3. Если QR нет — отдаем Gemini
+      const result = await ai.parseReceipt(link.href);
+      await ctx.deleteMessage(m.message_id);
+
+      if (!result.error) return this.saveParsedReceipt(ctx, result);
+      return ctx.reply('Не удалось распознать чек 😔');
+    }
 
     if (text === '/undo') {
       const success = await google.deleteLastRow('Finances');
       return ctx.reply(success ? '🗑 Последняя запись удалена.' : '⚠️ Нечего удалять.');
-    }
-
-    if (photo) {
-      const m = await ctx.reply('🧾 Читаю чек...');
-      const fileId = photo[photo.length - 1].file_id;
-      const link = await ctx.telegram.getFileLink(fileId);
-
-      const result = await ai.parseReceipt(link.href);
-      try { await ctx.deleteMessage(m.message_id); } catch (e) { }
-
-      if (!result || result.error || !result.items) {
-        return ctx.reply(`🤖 Ошибка AI: ${result?.error || 'Неизвестно'}`);
-      }
-
-      let msg = `🧾 *Чек на ${result.total} BYN:*\n`;
-      for (const item of result.items) {
-        await google.appendRow('Finances', [
-          new Date().toLocaleString('ru-RU'),
-          ctx.userConfig.name,
-          item.category || 'Разное',
-          item.sum,
-          item.desc
-        ]);
-        msg += `• ${item.category}: ${item.sum} (${item.desc})\n`;
-      }
-      return ctx.replyWithMarkdown(msg);
     }
 
     // 3. ТЕКСТ ("25 молоко" или "25")
@@ -201,7 +208,38 @@ module.exports = {
         [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
       ]));
     }
+  },
+
+  async saveParsedReceipt(ctx, data) {
+    let report = `✅ *Чек обработан (${data.source || 'AI'}):*\n`;
+    for (const item of data.items) {
+      // Если категории нет (из iKassa), просим AI распределить или ставим Разное
+      const cat = item.category || 'Еда'; // iKassa обычно продукты
+      await google.appendRow('Finances', [
+        new Date().toLocaleString('ru-RU'),
+        ctx.userConfig.name,
+        cat,
+        item.sum,
+        item.desc
+      ]);
+      report += `• ${cat}: ${item.sum} (${item.desc})\n`;
+    }
+    report += `\n💰 *Итого: ${data.total} BYN*`;
+    return ctx.replyWithMarkdown(report);
+  },
+
+  async actionCategory(ctx) {
+    const s = state.get(ctx.from.id);
+    if (!s || s.scene !== 'SPENT_CATEGORY') return ctx.answerCbQuery('Устарело');
+    const category = ctx.match[1];
+    const amount = s.amount;
+
+    await google.appendRow('Finances', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, category, amount, s.comment || '']);
+
+    // FIX CLEANUP: Удаляем сообщение с кнопками
+    try { await ctx.deleteMessage(); } catch (e) { }
+    await clearChat(ctx);
+
+    ctx.reply(`✅ Расход: ${amount} BYN [${category}]`);
   }
-
-
 };

@@ -15,7 +15,6 @@ async function getAvailableModels() {
     return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}`;
   }
 }
-
 async function parseReceipt(imageUrl) {
   if (!genAI) return { error: "API Key not configured" };
 
@@ -23,7 +22,7 @@ async function parseReceipt(imageUrl) {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
 
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+    // Включаем JSON mode для модели
 
     const prompt = `
             Проанализируй чек.
@@ -38,11 +37,9 @@ async function parseReceipt(imageUrl) {
       { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } }
     ]);
 
-    const text = result.response.text().replace(/```json|```/g, '').trim();
-    return JSON.parse(text);
+    return JSON.parse(result.response.text());
   } catch (error) {
-    console.error("Gemini Error:", error.message);
-    return { error: error.message };
+    return { error: "AI Error: " + error.message };
   }
 }
 
