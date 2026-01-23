@@ -1,10 +1,12 @@
-const { Markup } = require('telegraf');
+const jsQR = require('jsqr');
+const Jimp = require('jimp'); // Исправлено: заглавные буквы важны
+const { parseIkassa } = require('../services/receiptParser');
+const ai = require('../services/ai');
 const google = require('../services/google');
-const charts = require('../services/charts');
-const ai = require('../services/ai'); // Подключаем AI
 const state = require('../state');
 const keyboards = require('../keyboards');
 const { clearChat } = require('../utils/helpers');
+const { Markup } = require('telegraf');
 
 module.exports = {
 
@@ -135,86 +137,86 @@ module.exports = {
     const text = ctx.message.text || ctx.message.caption || '';
     const photo = ctx.message.photo;
 
-    // 1. Ищем УИ в тексте (1F13981C951B985B07185FB6)
-    const uiMatch = text.match(/[A-F0-9]{24}/);
-    if (uiMatch) {
-      const data = await parseIkassa(uiMatch[0]);
-      if (data) return this.saveParsedReceipt(ctx, data);
-    }
-
-    // 2. Если фото — пробуем найти QR
+    // 1. ЕСЛИ ЭТО ФОТО
     if (photo) {
-      const m = await ctx.reply('🔍 Проверяю QR-код и текст...');
+      const m = await ctx.reply('🔎 Ищу QR-код...');
       const fileId = photo[photo.length - 1].file_id;
       const link = await ctx.telegram.getFileLink(fileId);
 
+      let qrData = null;
       try {
-        // Читаем QR через Jimp + jsQR
-        const img = await jimp.read(link.href);
-        const qr = jsqr(img.bitmap.data, img.bitmap.width, img.bitmap.height);
+        const image = await Jimp.read(link.href);
+        const qr = jsQR(image.bitmap.data, image.bitmap.width, image.bitmap.height);
+        if (qr) qrData = qr.data;
+      } catch (e) { console.log('QR Error:', e.message); }
 
-        if (qr && qr.data.includes('ikassa')) {
-          const ui = qr.data.split('/').pop();
-          const data = await parseIkassa(ui);
-          if (data) {
-            await ctx.deleteMessage(m.message_id);
-            return this.saveParsedReceipt(ctx, data);
-          }
+      // --- ЛОГИКА QR ---
+      if (qrData) {
+        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🔗 QR найден, запрашиваю iKassa...');
+
+        // Извлекаем УИ (если это ссылка - берем конец, если просто текст - берем как есть)
+        let ui = qrData.includes('/') ? qrData.split('/').pop() : qrData;
+
+        const result = await parseIkassa(ui);
+
+        if (result.success) {
+          await ctx.deleteMessage(m.message_id).catch(() => { });
+          return this.saveParsedReceipt(ctx, result, 'iKassa');
+        } else {
+          // Если сайт не парсится (твое требование)
+          await ctx.deleteMessage(m.message_id).catch(() => { });
+          return ctx.reply(`❌ QR УИ - ${result.ui}.\n${result.url} не найден`);
         }
-      } catch (e) { console.log('QR Scan error:', e.message); }
+      }
 
-      // 3. Если QR нет — отдаем Gemini
-      const result = await ai.parseReceipt(link.href);
-      await ctx.deleteMessage(m.message_id);
+      // --- ЛОГИКА AI (если QR не найден) ---
+      await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🤖 QR не найден. Подключаю ИИ...');
+      try {
+        const result = await ai.parseReceipt(link.href);
+        await ctx.deleteMessage(m.message_id).catch(() => { });
 
-      if (!result.error) return this.saveParsedReceipt(ctx, result);
-      return ctx.reply('Не удалось распознать чек 😔');
+        if (result && !result.error) {
+          return this.saveParsedReceipt(ctx, result, 'Gemini AI');
+        }
+      } catch (e) { console.error('AI error:', e.message); }
+
+      await ctx.deleteMessage(m.message_id).catch(() => { });
+      return ctx.reply('😔 Не удалось распознать чек. Введите сумму текстом.');
     }
 
+    // 2. ЕСЛИ ЭТО ТЕКСТ (12.5 пиво)
+    const match = text.match(/^(\d+([.,]\d+)?)\s*(.*)/);
+    if (match) {
+      const amount = parseFloat(match[1].replace(',', '.'));
+      const comment = match[3].trim();
+
+      if (comment) {
+        await google.appendRow('Finances', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, 'Разное', amount, comment]);
+        return ctx.reply(`✅ Записано: ${amount} BYN [Разное] (${comment})`);
+      } else {
+        state.set(ctx.from.id, { scene: 'SPENT_CATEGORY', amount: amount });
+        return ctx.reply(`💸 ${amount} BYN. Категория?`, Markup.inlineKeyboard([
+          [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
+          [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
+          [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('📦 Другое', 'cat_Разное')]
+        ]));
+      }
+    }
+
+    // Если это команда /undo
     if (text === '/undo') {
       const success = await google.deleteLastRow('Finances');
       return ctx.reply(success ? '🗑 Последняя запись удалена.' : '⚠️ Нечего удалять.');
     }
-
-    // 3. ТЕКСТ ("25 молоко" или "25")
-    const match = text.match(/^(\d+([.,]\d+)?)\s*(.*)/);
-    if (!match) return; // Не похоже на расход
-
-    const amount = parseFloat(match[1].replace(',', '.'));
-    const restText = match[3].trim();
-
-    if (restText) {
-      // Пытаемся угадать категорию через AI или по списку
-      // Для скорости: если AI включен, можно спросить его, или просто записать в Разное с комментом
-      // Давай запишем в "Разное" (или AI определит), а текст в коммент
-
-      // Вариант с AI (если не жалко лимитов):
-      const aiCat = await ai.categorizeText(restText);
-      const cat = aiCat?.category || 'Разное';
-
-      // Вариант простой:
-      // const cat = 'Разное';
-
-      await google.appendRow('Finances', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, cat, amount, restText]);
-      ctx.reply(`✅ ${amount} BYN -> ${cat} (${restText})`);
-    } else {
-      // Просто число -> Спрашиваем категорию (Инлайн в теме)
-      state.set(ctx.from.id, { scene: 'SPENT_CATEGORY', amount: amount });
-      ctx.reply(`💸 ${amount} BYN. Категория?`, Markup.inlineKeyboard([
-        [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
-        [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
-        [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('👗 Одежда', 'cat_Одежда')],
-        [Markup.button.callback('💅 Уход и красота', 'cat_Уход и красота'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
-        [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
-      ]));
-    }
   },
 
-  async saveParsedReceipt(ctx, data) {
-    let report = `✅ *Чек обработан (${data.source || 'AI'}):*\n`;
+  // СОХРАНЕНИЕ В ТАБЛИЦУ
+  async saveParsedReceipt(ctx, data, source) {
+    let report = `🧾 *Чек обработан (${source}):*\n`;
+    let totalSaved = 0;
+
     for (const item of data.items) {
-      // Если категории нет (из iKassa), просим AI распределить или ставим Разное
-      const cat = item.category || 'Еда'; // iKassa обычно продукты
+      const cat = item.category || 'Еда';
       await google.appendRow('Finances', [
         new Date().toLocaleString('ru-RU'),
         ctx.userConfig.name,
@@ -222,9 +224,11 @@ module.exports = {
         item.sum,
         item.desc
       ]);
-      report += `• ${cat}: ${item.sum} (${item.desc})\n`;
+      report += `• ${cat}: ${item.sum} (${item.desc.slice(0, 20)})\n`;
+      totalSaved += item.sum;
     }
-    report += `\n💰 *Итого: ${data.total} BYN*`;
+
+    report += `\n💰 *Итого: ${data.total || totalSaved.toFixed(2)} BYN*`;
     return ctx.replyWithMarkdown(report);
   },
 

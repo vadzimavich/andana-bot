@@ -50,7 +50,12 @@ bot.on('message', async (ctx, next) => {
 // --- MENU TRIGGERS ---
 const trigger = (text, handler) => {
   bot.hears(text, async (ctx) => {
-    try { await ctx.deleteMessage(); } catch (e) { }
+    // В темах удаление сообщения юзера (нажатие кнопки) может вызвать ошибку 400
+    try {
+      await ctx.deleteMessage();
+    } catch (e) {
+      // Игнорируем
+    }
     await handler(ctx);
   });
 };
@@ -125,6 +130,16 @@ bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
 
 bot.action(/^cat_(.+)/, Finance.actionCategory);
 bot.command('models', Finance.debugModels);
+
+bot.command('menu', async (ctx) => {
+  const topicId = ctx.message.message_thread_id;
+  const type = Settings.getTopicType(topicId);
+
+  if (type === 'expenses') {
+    return ctx.reply("💸 *Тема: Расходы*\n\n• Просто пиши число и товар\n• Кидай фото чека/QR\n• /undo — отмена", Markup.inlineKeyboard([[Markup.button.callback('📊 Отчет', 'rep_finance')]]));
+  }
+  // ... и так далее для других тем
+});
 
 // --- TEXT ---
 bot.on('text', async (ctx) => {

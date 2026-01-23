@@ -2,43 +2,42 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 async function parseIkassa(ui) {
+  const url = `https://receipts.cloud.ikassa.by/render/${ui}`;
   try {
-    const url = `https://receipts.cloud.ikassa.by/render/${ui}`;
-    const { data } = await axios.get(url);
+    const { data } = await axios.get(url, { timeout: 5000 });
     const $ = cheerio.load(data);
 
     const items = [];
     let total = 0;
 
-    // В iKassa товары лежат в <div id="receiptBody"> в тегах <pre>
     $('#receiptBody pre').each((i, el) => {
       const text = $(el).text().trim();
-
-      // Ищем строку с ценой и количеством (формат: 18.99 *0.176  3.34)
       if (text.includes('*')) {
-        const prevText = $(el).prev().text().trim(); // Название товара обычно в предыдущем pre
+        const name = $(el).prev('pre').text().trim();
         const parts = text.split(/\s+/);
-        const sum = parseFloat(parts[parts.length - 1]);
+        const sum = parseFloat(parts[parts.length - 1].replace(',', '.'));
 
-        if (!isNaN(sum)) {
-          items.push({
-            desc: prevText || 'Товар',
-            sum: sum
-          });
+        if (!isNaN(sum) && name) {
+          items.push({ desc: name, sum: sum });
         }
       }
-
-      // Ищем ИТОГО
       if (text.includes('ИТОГО К ОПЛАТЕ')) {
-        const match = text.match(/[\d.]+/);
-        if (match) total = parseFloat(match[0]);
+        const match = text.match(/(\d+[.,]\d+)/);
+        if (match) total = parseFloat(match[0].replace(',', '.'));
       }
     });
 
-    return { total, items, source: 'iKassa' };
+    if (total === 0) total = items.reduce((acc, curr) => acc + curr.sum, 0);
+
+    return {
+      success: true,
+      total: total.toFixed(2),
+      items,
+      url
+    };
   } catch (e) {
-    console.error('iKassa Parser Error:', e.message);
-    return null;
+    // Если статус 404 или любая ошибка загрузки
+    return { success: false, url, ui };
   }
 }
 
