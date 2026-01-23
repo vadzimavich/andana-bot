@@ -4,11 +4,10 @@ const reportService = require('./services/report');
 const externalService = require('./services/external');
 const google = require('./services/google');
 const Settings = require('./controllers/settings');
-const Weight = require('./controllers/weight'); // <-- Импортируем Weight
+const Weight = require('./controllers/weight');
 
 let tasks = [];
 
-// Хелпер для мыслей
 async function getDailyThoughts() {
   const rows = await google.getSheetData('Thoughts', 'A:C');
   const todayStr = new Date().toLocaleString('ru-RU').split(',')[0];
@@ -58,7 +57,6 @@ const startJobs = (bot) => {
 
     const task = cron.schedule(schedule, async () => {
       try {
-        // 1. Собираем данные
         const [weightStats, thoughtsData] = await Promise.all([
           Weight.getDailyStatus(),
           getDailyThoughts()
@@ -70,7 +68,6 @@ const startJobs = (bot) => {
           const name = userData.name;
           const weightStr = weightStats.has(name) ? '⚖️ Вес: 🥹 Записан' : '⚖️ Вес: 🌚 Не записан';
 
-          // Мысли
           const thoughts = thoughtsData[name] || [];
           let thoughtStr = '';
           if (thoughts.length > 0) {

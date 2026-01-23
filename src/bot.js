@@ -27,11 +27,9 @@ bot.use(async (ctx, next) => {
   if (ctx.chat.id.toString() === config.CHAT_HQ_ID) return next();
 });
 
-// --- TOPIC ROUTER (Вставляем ПЕРЕД текстовым обработчиком) ---
+// --- TOPIC ROUTER ---
 bot.on('message', async (ctx, next) => {
-  // Игнорируем личку, команды и служебные сообщения
   if (ctx.chat.type === 'private' || ctx.message.text?.startsWith('/') || !ctx.message.message_thread_id) {
-    // Но проверяем команду /link и /undo, если они пришли текстом
     if (ctx.message.text?.startsWith('/link')) return Settings.linkTopic(ctx);
     return next();
   }
@@ -39,12 +37,12 @@ bot.on('message', async (ctx, next) => {
   const topicId = ctx.message.message_thread_id;
   const topicType = Settings.getTopicType(topicId);
 
-  if (!topicType) return next(); // Тема не привязана
+  if (!topicType) return next();
 
   if (topicType === config.TOPICS.EXPENSES) return Finance.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.SHOPPING) return Shopping.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.INBOX) return Tasks.handleTopicMessage(ctx);
-  if (topicType === config.TOPICS.IDEAS) return Thoughts.handleTopicMessage(ctx); // Если добавишь метод в thoughts.js
+  // if (topicType === config.TOPICS.IDEAS) return Thoughts.handleTopicMessage(ctx);
 
   return next();
 });
@@ -62,7 +60,6 @@ bot.hears('⚖️ Вес', (ctx) => {
   Weight.start(ctx);
 });
 
-// ТРИГГЕРЫ
 trigger('❓ Помощь', General.help);
 trigger('📊 Отчеты', General.reportMenu);
 trigger('⚙️ Конфиг', Settings.menu);
@@ -89,15 +86,12 @@ bot.action('cancel_scene', async (ctx) => {
   await ctx.answerCbQuery('Отменено');
 });
 
-// Отчеты
 bot.action('rep_finance', Finance.report);
 bot.action('rep_weight', Weight.report);
 
-// Настройки
 bot.action(/set_toggle_(.+)/, Settings.toggle);
 bot.action(/set_ask_(.+)/, Settings.askTime);
 
-// Задачи
 bot.action('task_add', Tasks.startAdd);
 bot.action('task_list', Tasks.list);
 bot.action(/^task_manage_(\d+)$/, Tasks.manage);
@@ -105,13 +99,11 @@ bot.action('task_done', Tasks.done);
 bot.action('task_plan', Plan.startFromTask);
 bot.action('open_tasks', Tasks.menu);
 
-// Покупки
 bot.action('open_shopping', Shopping.menu);
 bot.action('shop_add', Shopping.startAdd);
 bot.action('shop_list', Shopping.list);
 bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
 
-// Финансы
 bot.action(/^cat_(.+)/, Finance.actionCategory);
 
 // --- TEXT ---
@@ -120,7 +112,7 @@ bot.on('text', async (ctx) => {
   const scene = s?.scene;
   if (!scene) return;
 
-  if ((scene === 'WEIGHT') && !isPrivate(ctx)) {
+  if (scene === 'WEIGHT' && !isPrivate(ctx)) {
     state.clear(ctx.from.id);
     return ctx.reply('🔒 Это только для личного чата.');
   }
@@ -136,27 +128,17 @@ bot.on('text', async (ctx) => {
   if (scene === 'SET_TIME') return Settings.handleText(ctx);
 });
 
-// --- ЗАПУСК (ЭТОГО НЕ БЫЛО) ---
+// --- STARTUP ---
 (async () => {
   try {
-    // 1. Загружаем настройки из Google (минуты крона, привычки)
     await Settings.init();
-
-    // 2. Запускаем крон (уже с загруженными настройками)
     cronJobs.init(bot);
-
-    // 3. Запускаем бота
-    bot.launch().then(() => {
-      console.log('✅ AndanaBot V6 Running');
-    });
-
-    // 4. Запускаем сервер (для Render)
+    bot.launch().then(() => console.log('✅ AndanaBot V6 Running'));
     app.listen(config.PORT, () => console.log(`🌍 Web Server running on port ${config.PORT}`));
   } catch (e) {
     console.error('❌ Startup failed:', e);
   }
 })();
 
-// Graceful Stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
