@@ -2,7 +2,6 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const config = require('../config');
 const axios = require('axios');
 
-// Инициализация (если ключа нет, функции вернут null)
 const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : null;
 
 async function parseReceipt(imageUrl) {
@@ -11,6 +10,9 @@ async function parseReceipt(imageUrl) {
   try {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
+
+    // Используем gemini-1.5-flash, если не выйдет - gemini-pro-vision (для картинок)
+    // В бесплатном тарифе сейчас стабильна gemini-1.5-flash
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
@@ -29,7 +31,12 @@ async function parseReceipt(imageUrl) {
     const text = result.response.text().replace(/```json|```/g, '').trim();
     return JSON.parse(text);
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("Gemini Error:", error.message); // Логируем только сообщение
+
+    // Попытка fallback на другую модель, если 404
+    if (error.message.includes('404') || error.message.includes('not found')) {
+      return { error: "Модель AI недоступна. Попробуйте позже или введите вручную." };
+    }
     return { error: "Не удалось прочитать чек" };
   }
 }
@@ -37,6 +44,7 @@ async function parseReceipt(imageUrl) {
 async function categorizeText(text) {
   if (!genAI) return null;
   try {
+    // Для текста используем ту же модель
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const prompt = `
             Текст: "${text}".
@@ -46,7 +54,10 @@ async function categorizeText(text) {
     const result = await model.generateContent(prompt);
     const json = result.response.text().replace(/```json|```/g, '').trim();
     return JSON.parse(json);
-  } catch (e) { return null; }
+  } catch (e) {
+    console.error("AI Text Error:", e.message);
+    return null;
+  }
 }
 
 module.exports = { parseReceipt, categorizeText };
