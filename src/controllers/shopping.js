@@ -77,5 +77,27 @@ module.exports = {
     // FIX: Не удаляем сообщение здесь вручную.
     // Мы просто вызываем list(ctx), который сам удалит старое сообщение и пришлет обновленное.
     await module.exports.list(ctx);
-  }
+  },
+
+  async handleTopicMessage(ctx) {
+    const text = ctx.message.text;
+
+    if (text === '/undo') {
+      const success = await google.deleteLastRow('Shopping');
+      return ctx.reply(success ? '🗑 Последний товар удален.' : '⚠️ Список пуст.');
+    }
+
+    // Добавляем всё, что написано, как товары (через запятую или новую строку)
+    const items = text.split(/[\n,]/).map(i => i.trim()).filter(i => i);
+
+    if (items.length === 0) return;
+
+    for (const item of items) {
+      await google.appendRow('Shopping', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, item, 'New']);
+    }
+
+    ctx.reply(`🛒 Добавлено: ${items.join(', ')}`);
+  },
+
+
 };

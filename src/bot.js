@@ -28,6 +28,28 @@ bot.use(async (ctx, next) => {
   if (ctx.chat.id.toString() === config.CHAT_HQ_ID) return next();
 });
 
+// --- TOPIC ROUTER (Вставляем ПЕРЕД текстовым обработчиком) ---
+bot.on('message', async (ctx, next) => {
+  // Игнорируем личку, команды и служебные сообщения
+  if (ctx.chat.type === 'private' || ctx.message.text?.startsWith('/') || !ctx.message.message_thread_id) {
+    // Но проверяем команду /link и /undo, если они пришли текстом
+    if (ctx.message.text?.startsWith('/link')) return Settings.linkTopic(ctx);
+    return next();
+  }
+
+  const topicId = ctx.message.message_thread_id;
+  const topicType = Settings.getTopicType(topicId);
+
+  if (!topicType) return next(); // Тема не привязана
+
+  if (topicType === config.TOPICS.EXPENSES) return Finance.handleTopicMessage(ctx);
+  if (topicType === config.TOPICS.SHOPPING) return Shopping.handleTopicMessage(ctx);
+  if (topicType === config.TOPICS.INBOX) return Tasks.handleTopicMessage(ctx);
+  if (topicType === config.TOPICS.IDEAS) return Thoughts.handleTopicMessage(ctx); // Если добавишь метод в thoughts.js
+
+  return next();
+});
+
 // --- MENU TRIGGERS ---
 const trigger = (text, handler) => {
   bot.hears(text, async (ctx) => {
@@ -54,7 +76,6 @@ trigger('📝 Задачи', Tasks.menu);
 trigger('🛒 Покупки', Shopping.menu);
 trigger('💸 Расходы', Finance.startSpent);
 trigger('⚖️ Вес', Weight.start);
-trigger('✅ Привычки', Habits.menu);
 trigger('📝 В планы', Plan.start);
 trigger('💡 Мысли', Thoughts.start);
 trigger(['📅 Сегодня', '🗓 Завтра'], General.schedule);
@@ -99,14 +120,6 @@ bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
 
 // Финансы
 bot.action(/^cat_(.+)/, Finance.actionCategory);
-
-// Привычки
-bot.action(/^habit_toggle_(.+)/, Habits.toggle);
-bot.action('habit_add_new', Habits.startAdd);
-bot.action('habit_del_menu', Habits.deleteMenu);
-bot.action(/^habit_delete_(.+)/, Habits.deleteAction);
-bot.action('habit_chart', Habits.report);
-bot.action('habit_back', Habits.menu);
 
 // --- TEXT ---
 bot.on('text', async (ctx) => {

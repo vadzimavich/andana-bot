@@ -9,6 +9,7 @@ const googleCreds = process.env.GOOGLE_CREDENTIALS_BASE64
 
 module.exports = {
   TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
+  GEMINI_KEY: process.env.GEMINI_API_KEY,
   GOOGLE_CREDS: googleCreds,
   SHEET_ID: process.env.SHEET_ID,
   CALENDAR_IDS: {
@@ -17,20 +18,20 @@ module.exports = {
     ANYA: process.env.CAL_ANYA_ID,
   },
   USERS: {
-    [ANDREY_ID]: {
-      name: 'Андрей',
-      role: 'admin',
-      habits: ['💧 Вода', '💊 Витамины', '🇬🇧 Английский', '🏋️ Тренировка', '📵 Без телефона']
-    },
-    [ANYA_ID]: {
-      name: 'Аня',
-      role: 'admin',
-      habits: ['💧 Вода', '💊 Витамины', '🧘 Йога', '🥗 Салат', '📖 Чтение']
-    },
+    [ANDREY_ID]: { name: 'Андрей', role: 'admin' },
+    [ANYA_ID]: { name: 'Аня', role: 'admin' },
   },
   CHAT_HQ_ID: process.env.CHAT_HQ_ID,
   PORT: process.env.PORT || 3000,
-  // Дефолтные настройки крона (если нет в БД/файле)
+
+  // Типы тем для привязки
+  TOPICS: {
+    EXPENSES: 'expenses',
+    SHOPPING: 'shopping',
+    INBOX: 'inbox',
+    IDEAS: 'ideas'
+  },
+
   CRON_DEFAULTS: {
     morning_hour: 8,
     evening_hour: 23,

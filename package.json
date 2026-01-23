@@ -1,25 +1,21 @@
 {
   "name": "andana-bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/bot.js",
   "scripts": {
     "start": "node src/bot.js",
-    "dev": "nodemon src/bot.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon src/bot.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
-    "axios": "^1.13.2",
-    "chart.js": "^4.5.1",
-    "chartjs-node-canvas": "^5.0.0",
-    "chrono-node": "^2.9.0",
-    "dotenv": "^17.2.3",
-    "express": "^5.2.1",
-    "googleapis": "^168.0.0",
-    "node-cron": "^4.2.1",
-    "telegraf": "^4.16.3"
+    "axios": "^1.x.x",
+    "chart.js": "^4.x.x",
+    "chartjs-node-canvas": "^4.x.x",
+    "chrono-node": "^2.x.x",
+    "dotenv": "^16.x.x",
+    "express": "^4.x.x",
+    "googleapis": "^144.x.x",
+    "node-cron": "^3.x.x",
+    "telegraf": "^4.x.x",
+    "@google/generative-ai": "^0.1.3"
   }
 }

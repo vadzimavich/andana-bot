@@ -4,7 +4,6 @@ const reportService = require('./services/report');
 const externalService = require('./services/external');
 const google = require('./services/google');
 const Settings = require('./controllers/settings');
-const Habits = require('./controllers/habits');
 const Weight = require('./controllers/weight'); // <-- Импортируем Weight
 
 let tasks = [];
@@ -60,36 +59,25 @@ const startJobs = (bot) => {
     const task = cron.schedule(schedule, async () => {
       try {
         // 1. Собираем данные
-        const [habitStats, weightStats, thoughtsData] = await Promise.all([
-          Habits.getDailySummary(), // { 'Андрей': Set(...) }
-          Weight.getDailyStatus(),  // Set('Андрей', 'Аня')
-          getDailyThoughts()        // { 'Андрей': ['мысль'] }
+        const [weightStats, thoughtsData] = await Promise.all([
+          Weight.getDailyStatus(),
+          getDailyThoughts()
         ]);
 
         let userReport = '';
-        const usersConfig = s.users || {};
 
-        // 2. Формируем отчет по каждому пользователю
         for (const [userId, userData] of Object.entries(config.USERS)) {
           const name = userData.name;
-
-          // Привычки
-          const userHabits = usersConfig[userId]?.habits || userData.habits || [];
-          const doneCount = habitStats[name] ? habitStats[name].size : 0;
-          const habitsTotal = userHabits.length;
-          const habitStr = habitsTotal > 0 ? `✅ Сделано ${doneCount}/${habitsTotal} привычек` : '';
-
-          // Вес
           const weightStr = weightStats.has(name) ? '⚖️ Вес: 🥹 Записан' : '⚖️ Вес: 🌚 Не записан';
 
           // Мысли
           const thoughts = thoughtsData[name] || [];
           let thoughtStr = '';
           if (thoughts.length > 0) {
-            thoughtStr = `\n🗣 Думает:\n` + thoughts.map(t => `_«${t}»_`).join('\n');
+            thoughtStr = `\n🗣 Мысли:\n` + thoughts.map(t => `_«${t}»_`).join('\n');
           }
 
-          userReport += `👤 *${name}*\n${weightStr}\n${habitStr}${thoughtStr}\n\n`;
+          userReport += `👤 *${name}*\n${weightStr}${thoughtStr}\n\n`;
         }
 
         const msg = `🌙 *Вечерний чек*\n\n${userReport}👇 *Не забудьте:*`;

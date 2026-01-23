@@ -152,5 +152,32 @@ module.exports = {
     state.clear(ctx.from.id);
     ctx.reply(`✅ Время обновлено: ${fmtTime(h, m)}`);
     await module.exports.menu(ctx);
+  },
+
+  async linkTopic(ctx) {
+    const topicId = ctx.message.message_thread_id;
+    if (!topicId) return ctx.reply('Эту команду нужно писать внутри Темы (Topic).');
+
+    // /link expenses
+    const type = ctx.message.text.split(' ')[1]?.toLowerCase();
+    const validTypes = Object.values(config.TOPICS);
+
+    if (!validTypes.includes(type)) {
+      return ctx.reply(`⚠️ Неверный тип.\nДоступные: ${validTypes.join(', ')}\nПример: /link expenses`);
+    }
+
+    const s = module.exports.getSettings();
+    if (!s.topics) s.topics = {};
+
+    // Сохраняем ID темы -> Тип
+    s.topics[topicId] = type;
+    await module.exports.saveSettings(s);
+
+    ctx.reply(`✅ Тема привязана к функции: *${type.toUpperCase()}*`, { parse_mode: 'Markdown' });
+  },
+
+  getTopicType(topicId) {
+    const s = module.exports.getSettings();
+    return s.topics ? s.topics[topicId] : null;
   }
 };

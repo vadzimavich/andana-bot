@@ -110,5 +110,17 @@ module.exports = {
     // Уведомление и возврат к списку кнопок
     await ctx.reply(`✅ Выполнено: "${s.currentTaskText}"`);
     setTimeout(() => module.exports.list(ctx), 500);
-  }
+  },
+
+  async handleTopicMessage(ctx) {
+    const text = ctx.message.text;
+
+    if (text === '/undo') {
+      const success = await google.deleteLastRow('Inbox');
+      return ctx.reply(success ? '🗑 Последняя задача удалена.' : '⚠️ Инбокс пуст.');
+    }
+
+    await google.appendRow('Inbox', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, text, 'New']);
+    ctx.reply('📥 Сохранено в Инбокс');
+  },
 };

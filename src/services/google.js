@@ -117,6 +117,32 @@ async function deleteRow(sheetName, rowIndex) {
   }
 }
 
+async function deleteLastRow(sheetName) {
+  try {
+    // Получаем данные, чтобы узнать кол-во строк
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: config.SHEET_ID,
+      range: `${sheetName}!A:A`, // Читаем только первый столбец
+    });
+
+    const rows = res.data.values || [];
+    if (rows.length === 0) return false; // Пустой лист
+
+    const lastRowIndex = rows.length; // Индекс последней строки (1-based)
+
+    // Не удаляем заголовок (строка 1)
+    if (lastRowIndex <= 1) return false;
+
+    // Используем уже существующую deleteRow
+    return await module.exports.deleteRow(sheetName, lastRowIndex - 1); // deleteRow принимает 0-based index для API batchUpdate? 
+    // В моей реализации deleteRow выше (в прошлых ответах) мы использовали startIndex (0-based).
+    // Если lastRowIndex = 5 (строка 5), то startIndex = 4.
+  } catch (error) {
+    console.error(`Undo Error [${sheetName}]:`, error.message);
+    return false;
+  }
+}
+
 // --- CALENDAR (Без изменений) ---
 async function addEvent(calendarId, summary, dateObj, isAllDay = false) {
   const resource = { summary, description: "Created by AndanaBot" };
@@ -194,6 +220,7 @@ module.exports = {
   updateCell,
   updateRow,
   deleteRow,
+  deleteLastRow,
   addEvent,
   getEvents,
   getSettingsJson,
