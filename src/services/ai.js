@@ -23,8 +23,7 @@ async function parseReceipt(imageUrl) {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
 
-    // ИСПОЛЬЗУЕМ МОДЕЛЬ ИЗ ТВОЕГО СПИСКА (Gemini 2.0 Flash)
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
     const prompt = `
             Проанализируй чек.
