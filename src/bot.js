@@ -10,7 +10,6 @@ const Shopping = require('./controllers/shopping');
 const Thoughts = require('./controllers/thoughts');
 const Finance = require('./controllers/finance');
 const Weight = require('./controllers/weight');
-const Habits = require('./controllers/habits');
 const Plan = require('./controllers/plan');
 const Settings = require('./controllers/settings');
 
