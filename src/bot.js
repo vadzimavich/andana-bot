@@ -105,7 +105,6 @@ bot.action('shop_list', Shopping.list);
 bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
 
 bot.action(/^cat_(.+)/, Finance.actionCategory);
-
 bot.command('models', Finance.debugModels);
 
 // --- TEXT ---

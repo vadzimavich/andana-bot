@@ -12,11 +12,18 @@ module.exports = {
   // },
 
   async startSpent(ctx) {
-    // УБРАЛИ лишнее удаление
+    try { await ctx.deleteMessage(); } catch (e) { }
     await clearChat(ctx);
     state.set(ctx.from.id, { scene: 'SPENT_AMOUNT', msgs: [] });
     const m = await ctx.reply('💸 Сколько потрачено? (число):', keyboards.CancelButton);
     state.addMsgToDelete(ctx.from.id, m.message_id);
+  },
+
+  async debugModels(ctx) {
+    const m = await ctx.reply('📡 Спрашиваю у Google доступные модели...');
+    const list = await ai.getAvailableModels();
+    try { await ctx.deleteMessage(m.message_id); } catch (e) { }
+    await ctx.reply(`🤖 Ответ Google:\n\n${list}`);
   },
 
   async handleText(ctx) {
@@ -36,7 +43,7 @@ module.exports = {
         [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
         [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
         [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('👗 Одежда', 'cat_Одежда')],
-        [Markup.button.callback('💅 Уход и красота', 'cat_Уход и красота'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
+        [Markup.button.callback('💅 Уход и красота', 'cat_Уход'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
         [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
       ]));
       state.addMsgToDelete(ctx.from.id, m.message_id);
@@ -131,29 +138,21 @@ module.exports = {
     const text = ctx.message.text;
     const photo = ctx.message.photo;
 
-    // ОТЛАДКА
-    if (text === '/models') {
-      const list = await ai.getAvailableModels();
-      return ctx.reply(`🤖 Доступные модели:\n\n${list}`);
-    }
-
-    // 1. UNDO
     if (text === '/undo') {
       const success = await google.deleteLastRow('Finances');
       return ctx.reply(success ? '🗑 Последняя запись удалена.' : '⚠️ Нечего удалять.');
     }
 
-    // 2. ФОТО (ЧЕК)
     if (photo) {
       const m = await ctx.reply('🧾 Читаю чек...');
       const fileId = photo[photo.length - 1].file_id;
       const link = await ctx.telegram.getFileLink(fileId);
 
       const result = await ai.parseReceipt(link.href);
-      await ctx.deleteMessage(m.message_id);
+      try { await ctx.deleteMessage(m.message_id); } catch (e) { }
 
       if (!result || result.error || !result.items) {
-        return ctx.reply('🤖 Не смог разобрать чек. Введите сумму вручную.');
+        return ctx.reply(`🤖 Ошибка AI: ${result?.error || 'Неизвестно'}`);
       }
 
       let msg = `🧾 *Чек на ${result.total} BYN:*\n`;

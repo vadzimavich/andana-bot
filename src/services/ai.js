@@ -8,18 +8,11 @@ const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : nu
 async function getAvailableModels() {
   if (!config.GEMINI_KEY) return "Нет API ключа";
   try {
-    // Делаем прямой запрос, минуя библиотеку, чтобы видеть "сырой" ответ
     const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.GEMINI_KEY}`;
     const res = await axios.get(url);
-
-    const models = res.data.models
-      .filter(m => m.supportedGenerationMethods.includes("generateContent"))
-      .map(m => m.name.replace('models/', ''))
-      .join('\n');
-
-    return models || "Список моделей пуст (региональная блокировка?)";
+    return res.data.models.map(m => m.name).join('\n');
   } catch (e) {
-    return `Ошибка получения списка: ${e.response?.data?.error?.message || e.message}`;
+    return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}\n(Скорее всего, регион сервера заблокирован)`;
   }
 }
 
@@ -30,7 +23,7 @@ async function parseReceipt(imageUrl) {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
 
-    // Пробуем самую новую стабильную модель
+    // Используем самую свежую и легкую модель
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
@@ -50,7 +43,7 @@ async function parseReceipt(imageUrl) {
     return JSON.parse(text);
   } catch (error) {
     console.error("Gemini Error:", error.message);
-    return { error: `AI Error: ${error.message}` };
+    return { error: error.message };
   }
 }
 
