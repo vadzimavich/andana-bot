@@ -4,31 +4,23 @@ const axios = require('axios');
 
 const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : null;
 
-// Список моделей для перебора (если одна не сработает)
-const MODELS = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+// --- ОТЛАДКА: ПОЛУЧИТЬ СПИСОК МОДЕЛЕЙ ---
+async function getAvailableModels() {
+  if (!config.GEMINI_KEY) return "Нет API ключа";
+  try {
+    // Делаем прямой запрос, минуя библиотеку, чтобы видеть "сырой" ответ
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.GEMINI_KEY}`;
+    const res = await axios.get(url);
 
-async function tryGenerate(prompt, imagePart = null) {
-  if (!genAI) throw new Error("API Key missing");
+    const models = res.data.models
+      .filter(m => m.supportedGenerationMethods.includes("generateContent"))
+      .map(m => m.name.replace('models/', ''))
+      .join('\n');
 
-  let lastError = null;
-
-  for (const modelName of MODELS) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const content = imagePart ? [prompt, imagePart] : [prompt];
-
-      const result = await model.generateContent(content);
-      const response = await result.response;
-      return response.text();
-    } catch (e) {
-      console.warn(`⚠️ Model ${modelName} failed:`, e.message);
-      lastError = e;
-      // Если ошибка 404 (модель не найдена), пробуем следующую.
-      // Если ошибка другая (например, ключ неверный), то нет смысла перебирать.
-      if (!e.message.includes('404') && !e.message.includes('not found')) break;
-    }
+    return models || "Список моделей пуст (региональная блокировка?)";
+  } catch (e) {
+    return `Ошибка получения списка: ${e.response?.data?.error?.message || e.message}`;
   }
-  throw lastError;
 }
 
 async function parseReceipt(imageUrl) {
@@ -38,6 +30,9 @@ async function parseReceipt(imageUrl) {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
 
+    // Пробуем самую новую стабильную модель
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
     const prompt = `
             Проанализируй чек.
             1. Верни общую сумму (total).
@@ -46,20 +41,16 @@ async function parseReceipt(imageUrl) {
             Верни ТОЛЬКО JSON. Пример: {"total": 100, "items": [{"category": "Еда", "sum": 100, "desc": "Молоко"}]}
         `;
 
-    const imagePart = {
-      inlineData: {
-        data: imageBuffer.toString("base64"),
-        mimeType: "image/jpeg",
-      },
-    };
+    const result = await model.generateContent([
+      prompt,
+      { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } }
+    ]);
 
-    const text = await tryGenerate(prompt, imagePart);
-    const jsonStr = text.replace(/```json|```/g, '').trim();
-    return JSON.parse(jsonStr);
-
+    const text = result.response.text().replace(/```json|```/g, '').trim();
+    return JSON.parse(text);
   } catch (error) {
-    console.error("Gemini Final Error:", error.message);
-    return { error: "Не удалось прочитать чек (AI недоступен)" };
+    console.error("Gemini Error:", error.message);
+    return { error: `AI Error: ${error.message}` };
   }
 }
 
@@ -79,4 +70,4 @@ async function categorizeText(text) {
   }
 }
 
-module.exports = { parseReceipt, categorizeText };
+module.exports = { parseReceipt, categorizeText, getAvailableModels };
