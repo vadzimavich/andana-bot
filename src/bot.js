@@ -10,7 +10,6 @@ const Shopping = require('./controllers/shopping');
 const Thoughts = require('./controllers/thoughts');
 const Finance = require('./controllers/finance');
 const Weight = require('./controllers/weight');
-const Habits = require('./controllers/habits');
 const Plan = require('./controllers/plan');
 const Settings = require('./controllers/settings');
 
@@ -63,11 +62,6 @@ bot.hears('⚖️ Вес', (ctx) => {
   Weight.start(ctx);
 });
 
-bot.hears('✅ Привычки', (ctx) => {
-  if (!isPrivate(ctx)) return ctx.reply('🔒 Привычки — дело личное.');
-  Habits.menu(ctx);
-});
-
 // ТРИГГЕРЫ
 trigger('❓ Помощь', General.help);
 trigger('📊 Отчеты', General.reportMenu);
@@ -98,7 +92,6 @@ bot.action('cancel_scene', async (ctx) => {
 // Отчеты
 bot.action('rep_finance', Finance.report);
 bot.action('rep_weight', Weight.report);
-bot.action('rep_habits', Habits.report);
 
 // Настройки
 bot.action(/set_toggle_(.+)/, Settings.toggle);
@@ -127,7 +120,7 @@ bot.on('text', async (ctx) => {
   const scene = s?.scene;
   if (!scene) return;
 
-  if ((scene === 'WEIGHT' || scene === 'HABIT_ADD') && !isPrivate(ctx)) {
+  if ((scene === 'WEIGHT') && !isPrivate(ctx)) {
     state.clear(ctx.from.id);
     return ctx.reply('🔒 Это только для личного чата.');
   }
@@ -141,7 +134,6 @@ bot.on('text', async (ctx) => {
   if (scene === 'SPENT_AMOUNT' || scene === 'SPENT_CATEGORY') return Finance.handleText(ctx);
   if (scene === 'PLAN_DATE' || scene === 'PLAN_DATE_FROM_TASK') return Plan.handleText(ctx);
   if (scene === 'SET_TIME') return Settings.handleText(ctx);
-  if (scene === 'HABIT_ADD') return Habits.handleText(ctx);
 });
 
 // --- ЗАПУСК (ЭТОГО НЕ БЫЛО) ---
