@@ -7,16 +7,9 @@ const keyboards = require('../keyboards');
 const { clearChat } = require('../utils/helpers');
 
 module.exports = {
-  async handleTopicMessage(ctx) {
-    const text = ctx.message.text;
-    const photo = ctx.message.photo;
+  // async handleTopicMessage(ctx) {
 
-    // ОТЛАДКА
-    if (text === '/models') {
-      const list = await ai.getAvailableModels();
-      return ctx.reply(`🤖 Доступные модели:\n\n${list}`);
-    }
-  },
+  // },
 
   async startSpent(ctx) {
     // УБРАЛИ лишнее удаление
@@ -137,6 +130,12 @@ module.exports = {
   async handleTopicMessage(ctx) {
     const text = ctx.message.text;
     const photo = ctx.message.photo;
+
+    // ОТЛАДКА
+    if (text === '/models') {
+      const list = await ai.getAvailableModels();
+      return ctx.reply(`🤖 Доступные модели:\n\n${list}`);
+    }
 
     // 1. UNDO
     if (text === '/undo') {
