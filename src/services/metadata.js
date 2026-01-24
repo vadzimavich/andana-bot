@@ -5,22 +5,8 @@ const cheerio = require('cheerio');
 const parsers = {
   wildberries: async (url) => {
     try {
-      // Разворачиваем короткие ссылки
-      let finalUrl = url;
-      if (url.includes('wb.ru')) {
-        try {
-          const response = await axios.get(url, {
-            maxRedirects: 5,
-            validateStatus: () => true,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-          });
-          finalUrl = response.request.res.responseUrl || url;
-        } catch (e) {
-          console.log('WB redirect error:', e.message);
-        }
-      }
-
-      const articleMatch = finalUrl.match(/catalog\/(\d+)/);
+      // Извлекаем артикул
+      const articleMatch = url.match(/catalog\/(\d+)/);
       if (!articleMatch) {
         console.log('WB: Артикул не найден');
         return null;
@@ -29,31 +15,33 @@ const parsers = {
       const article = articleMatch[1];
       console.log('WB: Артикул', article);
 
-      // Пробуем новое API (работает в 2026)
-      const apiUrl = `https://card.wb.ru/cards/detail?appType=1&curr=rub&dest=-1257786&spp=0&nm=${article}`;
-
-      const { data } = await axios.get(apiUrl, {
+      // Пробуем парсить HTML напрямую (API не работает)
+      const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Accept': '*/*',
-          'Origin': 'https://www.wildberries.ru'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ru-RU,ru;q=0.9'
         },
         timeout: 10000
       });
 
-      console.log('WB API:', data?.data?.products ? 'OK' : 'Empty');
+      const $ = cheerio.load(data);
 
-      if (data?.data?.products?.[0]) {
-        const product = data.data.products[0];
+      // Ищем данные в HTML
+      let title = $('h1[class*="product-page__title"]').text().trim() ||
+        $('meta[property="og:title"]').attr('content') ||
+        $('h1').first().text().trim();
 
-        // Новая схема картинок WB 2026
-        const shortId = product.id.toString().slice(0, -3);
-        const vol = product.id.toString().slice(0, -5);
-        const imageUrl = `https://basket-${vol.padStart(2, '0')}.wbbasket.ru/vol${vol}/part${shortId}/${product.id}/images/big/1.webp`;
+      let imageUrl = $('meta[property="og:image"]').attr('content') ||
+        $('img[class*="product-page__img"]').first().attr('src');
 
+      console.log('WB HTML: Title:', title);
+      console.log('WB HTML: Image:', imageUrl);
+
+      if (title) {
         return {
-          title: product.name,
-          image: imageUrl,
+          title: title.substring(0, 150),
+          image: imageUrl || 'https://via.placeholder.com/400',
           url: url
         };
       }
@@ -67,61 +55,38 @@ const parsers = {
     try {
       console.log('Ozon: Parsing', url);
 
-      // Для коротких ссылок делаем ручной редирект
-      let finalUrl = url;
-      if (url.includes('/t/')) {
-        try {
-          const response = await axios.head(url, {
-            maxRedirects: 0,
-            validateStatus: (status) => status === 301 || status === 302,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)'
-            },
-            timeout: 5000
-          });
-          finalUrl = response.headers.location || url;
-          console.log('Ozon: Развернутый URL', finalUrl);
-        } catch (e) {
-          if (e.response?.headers?.location) {
-            finalUrl = e.response.headers.location;
-            console.log('Ozon: Развернутый URL (from error)', finalUrl);
-          }
-        }
-      }
-
-      // Парсим страницу
-      const { data } = await axios.get(finalUrl, {
+      // Для коротких ссылок НЕ разворачиваем, а просто парсим напрямую
+      const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html',
-          'Accept-Language': 'ru'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ru-RU,ru;q=0.9'
         },
-        maxRedirects: 3,
-        timeout: 10000
+        maxRedirects: 10, // Разрешаем больше редиректов
+        timeout: 15000
       });
 
       const $ = cheerio.load(data);
 
-      // Ищем данные
       let title = null;
       let imageUrl = null;
 
-      // 1. JSON-LD
+      // 1. Ищем JSON-LD
       $('script[type="application/ld+json"]').each((i, elem) => {
         try {
           const json = JSON.parse($(elem).html());
-          if (json['@type'] === 'Product') {
+          if (json['@type'] === 'Product' || json.name) {
             title = json.name;
-            imageUrl = json.image || json.image?.[0];
+            imageUrl = Array.isArray(json.image) ? json.image[0] : json.image;
           }
         } catch (e) { }
       });
 
-      // 2. Open Graph fallback
+      // 2. Open Graph
       if (!title) title = $('meta[property="og:title"]').attr('content');
       if (!imageUrl) imageUrl = $('meta[property="og:image"]').attr('content');
 
-      // 3. Обычные теги
+      // 3. H1
       if (!title) title = $('h1').first().text().trim();
 
       console.log('Ozon: Title:', title);
@@ -138,57 +103,6 @@ const parsers = {
       console.error('Ozon Parser Error:', e.message);
     }
     return null;
-  },
-
-  aliexpress: async (url) => {
-    try {
-      // Разворачиваем короткую ссылку ali.click
-      let finalUrl = url;
-      if (url.includes('ali.click') || url.includes('s.click.aliexpress.com')) {
-        try {
-          const response = await axios.head(url, {
-            maxRedirects: 0,
-            validateStatus: (status) => status === 301 || status === 302,
-            timeout: 5000
-          });
-          finalUrl = response.headers.location || url;
-        } catch (e) {
-          if (e.response?.headers?.location) {
-            finalUrl = e.response.headers.location;
-          }
-        }
-      }
-
-      console.log('AliExpress: Final URL', finalUrl);
-
-      const { data } = await axios.get(finalUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          'Accept': 'text/html',
-          'Accept-Language': 'ru'
-        },
-        maxRedirects: 3,
-        timeout: 10000
-      });
-
-      const $ = cheerio.load(data);
-
-      let title = $('meta[property="og:title"]').attr('content') ||
-        $('h1').first().text().trim() ||
-        'AliExpress товар';
-
-      let imageUrl = $('meta[property="og:image"]').attr('content') ||
-        $('img[data-image-index="0"]').attr('src');
-
-      return {
-        title: title.substring(0, 150),
-        image: imageUrl || 'https://via.placeholder.com/400',
-        url: url
-      };
-    } catch (e) {
-      console.error('AliExpress Parser Error:', e.message);
-    }
-    return null;
   }
 };
 
@@ -196,7 +110,7 @@ async function extractMeta(url) {
   try {
     console.log('📥 Extracting meta from:', url);
 
-    // WildBerries
+    // WildBerries - парсим HTML
     if (url.includes('wildberries') || url.includes('wb.ru')) {
       console.log('🛍 Detected: Wildberries');
       const wbData = await parsers.wildberries(url);
@@ -207,7 +121,7 @@ async function extractMeta(url) {
       console.log('⚠️ WB failed');
     }
 
-    // Ozon
+    // Ozon - парсим HTML с редиректами
     if (url.includes('ozon.')) {
       console.log('🛍 Detected: Ozon');
       const ozonData = await parsers.ozon(url);
@@ -218,26 +132,16 @@ async function extractMeta(url) {
       console.log('⚠️ Ozon failed');
     }
 
-    // AliExpress
-    if (url.includes('aliexpress') || url.includes('ali.click') || url.includes('s.click.aliexpress')) {
-      console.log('🛍 Detected: AliExpress');
-      const aliData = await parsers.aliexpress(url);
-      if (aliData) {
-        console.log('✅ AliExpress Success');
-        return aliData;
-      }
-      console.log('⚠️ AliExpress failed');
-    }
-
-    // Универсальный фоллбэк
-    console.log('🔄 Universal fallback');
+    // Для всех остальных (включая AliExpress) - используем OGS как раньше
+    console.log('🔄 Using Open Graph Scraper');
     const options = {
       url: url,
-      timeout: 10000,
+      timeout: 15000,
       fetchOptions: {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
-          'Accept': 'text/html'
+          'User-Agent': 'TelegramBot (like TwitterBot)',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'ru-RU,ru;q=0.9'
         }
       }
     };
@@ -246,18 +150,24 @@ async function extractMeta(url) {
 
     let imageUrl = 'https://via.placeholder.com/400x400/e8e8e8/888888?text=Товар';
     if (result.ogImage) {
-      imageUrl = Array.isArray(result.ogImage)
-        ? result.ogImage[0]?.url
-        : result.ogImage.url;
+      if (Array.isArray(result.ogImage)) {
+        imageUrl = result.ogImage[0]?.url || imageUrl;
+      } else if (result.ogImage.url) {
+        imageUrl = result.ogImage.url;
+      }
     }
 
     let title = result.ogTitle || result.ogDescription || 'Товар';
-    title = title.replace(/Купить |в интернет-магазине.*/gi, '').trim().substring(0, 150);
+    title = title
+      .replace(/Купить | в интернет-магазине .*/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 150);
 
-    console.log('✅ Fallback Success');
+    console.log('✅ OGS Success');
     return {
       title: title,
-      image: imageUrl || 'https://via.placeholder.com/400',
+      image: imageUrl,
       url: url
     };
 
