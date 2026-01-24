@@ -2,41 +2,37 @@ const ogs = require('open-graph-scraper');
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// User-Agent'ы Telegram ботов
+const TELEGRAM_UA = 'TelegramBot (like TwitterBot)';
+const TELEGRAM_UA_ALT = 'Mozilla/5.0 (compatible; TelegramBot/1.0; +https://telegram.org/bot)';
+
 const parsers = {
   wildberries: async (url) => {
     try {
-      // Извлекаем артикул
       const articleMatch = url.match(/catalog\/(\d+)/);
-      if (!articleMatch) {
-        console.log('WB: Артикул не найден');
-        return null;
-      }
+      if (!articleMatch) return null;
 
       const article = articleMatch[1];
       console.log('WB: Артикул', article);
 
-      // Пробуем парсить HTML напрямую (API не работает)
+      // Притворяемся Telegram Preview Bot
       const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'ru-RU,ru;q=0.9'
+          'User-Agent': TELEGRAM_UA,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         },
         timeout: 10000
       });
 
       const $ = cheerio.load(data);
 
-      // Ищем данные в HTML
-      let title = $('h1[class*="product-page__title"]').text().trim() ||
-        $('meta[property="og:title"]').attr('content') ||
-        $('h1').first().text().trim();
+      let title = $('meta[property="og:title"]').attr('content') ||
+        $('meta[name="title"]').attr('content');
 
-      let imageUrl = $('meta[property="og:image"]').attr('content') ||
-        $('img[class*="product-page__img"]').first().attr('src');
+      let imageUrl = $('meta[property="og:image"]').attr('content');
 
-      console.log('WB HTML: Title:', title);
-      console.log('WB HTML: Image:', imageUrl);
+      console.log('WB: Title:', title);
+      console.log('WB: Image:', imageUrl);
 
       if (title) {
         return {
@@ -46,7 +42,7 @@ const parsers = {
         };
       }
     } catch (e) {
-      console.error('WB Parser Error:', e.message);
+      console.error('WB Parser Error:', e.response?.status || e.message);
     }
     return null;
   },
@@ -55,39 +51,33 @@ const parsers = {
     try {
       console.log('Ozon: Parsing', url);
 
-      // Для коротких ссылок НЕ разворачиваем, а просто парсим напрямую
+      // Притворяемся Telegram Preview Bot
       const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'ru-RU,ru;q=0.9'
+          'User-Agent': TELEGRAM_UA,
+          'Accept': 'text/html'
         },
-        maxRedirects: 10, // Разрешаем больше редиректов
+        maxRedirects: 10,
         timeout: 15000
       });
 
       const $ = cheerio.load(data);
 
-      let title = null;
-      let imageUrl = null;
+      let title = $('meta[property="og:title"]').attr('content');
+      let imageUrl = $('meta[property="og:image"]').attr('content');
 
-      // 1. Ищем JSON-LD
-      $('script[type="application/ld+json"]').each((i, elem) => {
-        try {
-          const json = JSON.parse($(elem).html());
-          if (json['@type'] === 'Product' || json.name) {
-            title = json.name;
-            imageUrl = Array.isArray(json.image) ? json.image[0] : json.image;
-          }
-        } catch (e) { }
-      });
-
-      // 2. Open Graph
-      if (!title) title = $('meta[property="og:title"]').attr('content');
-      if (!imageUrl) imageUrl = $('meta[property="og:image"]').attr('content');
-
-      // 3. H1
-      if (!title) title = $('h1').first().text().trim();
+      // Fallback на JSON-LD
+      if (!title || !imageUrl) {
+        $('script[type="application/ld+json"]').each((i, elem) => {
+          try {
+            const json = JSON.parse($(elem).html());
+            if (json['@type'] === 'Product') {
+              if (!title) title = json.name;
+              if (!imageUrl) imageUrl = Array.isArray(json.image) ? json.image[0] : json.image;
+            }
+          } catch (e) { }
+        });
+      }
 
       console.log('Ozon: Title:', title);
       console.log('Ozon: Image:', imageUrl);
@@ -100,7 +90,7 @@ const parsers = {
         };
       }
     } catch (e) {
-      console.error('Ozon Parser Error:', e.message);
+      console.error('Ozon Parser Error:', e.response?.status || e.message);
     }
     return null;
   }
@@ -110,7 +100,7 @@ async function extractMeta(url) {
   try {
     console.log('📥 Extracting meta from:', url);
 
-    // WildBerries - парсим HTML
+    // WildBerries
     if (url.includes('wildberries') || url.includes('wb.ru')) {
       console.log('🛍 Detected: Wildberries');
       const wbData = await parsers.wildberries(url);
@@ -121,7 +111,7 @@ async function extractMeta(url) {
       console.log('⚠️ WB failed');
     }
 
-    // Ozon - парсим HTML с редиректами
+    // Ozon
     if (url.includes('ozon.')) {
       console.log('🛍 Detected: Ozon');
       const ozonData = await parsers.ozon(url);
@@ -132,16 +122,15 @@ async function extractMeta(url) {
       console.log('⚠️ Ozon failed');
     }
 
-    // Для всех остальных (включая AliExpress) - используем OGS как раньше
+    // Универсальный парсер (AliExpress и др.)
     console.log('🔄 Using Open Graph Scraper');
     const options = {
       url: url,
       timeout: 15000,
       fetchOptions: {
         headers: {
-          'User-Agent': 'TelegramBot (like TwitterBot)',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'ru-RU,ru;q=0.9'
+          'User-Agent': TELEGRAM_UA,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         }
       }
     };
