@@ -1,6 +1,6 @@
 const jsQR = require('jsqr');
 const Jimp = require('jimp'); // Исправлено: заглавные буквы важны
-const { parseIkassa } = require('../services/receiptParser');
+const { parseIkassa, parseEplus } = require('../services/receiptParser');
 const ai = require('../services/ai');
 const google = require('../services/google');
 const charts = require('../services/charts');
@@ -152,26 +152,27 @@ module.exports = {
 
       // Если QR найден
       if (qrData) {
-        // Проверяем, ссылка ли это на iKassa
-        if (qrData.includes('ikassa')) {
-          await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🔗 QR найден, запрашиваю iKassa...');
-          const ui = qrData.split('/').pop();
-          const result = await parseIkassa(ui);
+        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, `🔗 QR: ${qrData}\nЗапрашиваю данные...`);
 
-          if (result.success) {
-            await ctx.deleteMessage(m.message_id).catch(() => { });
-            return this.saveParsedReceipt(ctx, result, 'iKassa');
-          } else {
-            // QR есть, но сайт не открылся -> ОШИБКА (не идем в AI)
-            await ctx.deleteMessage(m.message_id).catch(() => { });
-            return ctx.reply(`❌ QR найден (${ui}), но чек не загрузился.\nПопробуйте фото без QR для AI.`);
-          }
-        } else {
-          // QR есть, но не iKassa -> Пробуем AI
-          await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🤖 QR не от iKassa. Пробую AI...');
+        let result = null;
+
+        // Сценарий 1: iKassa
+        if (qrData.includes('ikassa.by')) {
+          const ui = qrData.split('/').pop();
+          result = await parseIkassa(ui);
         }
-      } else {
-        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🤖 QR не найден. Читаю чек через AI...');
+        // Сценарий 2: Euroopt (eplus.by)
+        else if (qrData.includes('eplus.by')) {
+          result = await parseEplus(qrData);
+        }
+
+        if (result && result.success) {
+          await ctx.deleteMessage(m.message_id).catch(() => { });
+          return this.saveParsedReceipt(ctx, result, result.source);
+        } else if (result && !result.success) {
+          await ctx.deleteMessage(m.message_id).catch(() => { });
+          return ctx.reply(`❌ Не удалось загрузить чек (${result.source || 'Unknown'}).\nСсылка: ${result.url}`);
+        }
       }
 
       // Если дошли сюда -> используем AI
