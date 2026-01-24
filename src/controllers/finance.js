@@ -3,6 +3,7 @@ const Jimp = require('jimp'); // Исправлено: заглавные бук
 const { parseIkassa } = require('../services/receiptParser');
 const ai = require('../services/ai');
 const google = require('../services/google');
+const charts = require('../services/charts');
 const state = require('../state');
 const keyboards = require('../keyboards');
 const { clearChat } = require('../utils/helpers');

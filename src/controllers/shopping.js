@@ -44,21 +44,24 @@ module.exports = {
   },
 
   async list(ctx) {
-    // FIX: Оборачиваем удаление в try-catch, чтобы не крашилось, если сообщения уже нет
-    try { await ctx.deleteMessage(); } catch (e) { }
+    // УБИРАЕМ удаление сообщения. Пусть список появится НОВЫМ сообщением.
+    // try { await ctx.deleteMessage(); } catch (e) { }
 
     const rows = await google.getSheetData('Shopping', 'A:D');
     const items = rows.map((r, i) => ({ ...r, index: i + 1 })).filter(r => r[3] !== 'Done');
 
     if (!items.length) {
+      // Кнопку меняем на "Закрыть", чтобы убрать это сообщение
       return ctx.reply('Список покупок пуст! 🎉', Markup.inlineKeyboard([
-        [Markup.button.callback('🔙 Назад', 'open_shopping')]
+        [Markup.button.callback('❌ Закрыть', 'close_menu')]
       ]));
     }
 
     const buttons = items.map(item => [Markup.button.callback(`◻️ ${item[2]}`, `shop_buy_${item.index}`)]);
-    buttons.push([Markup.button.callback('🔙 Назад', 'open_shopping')]);
+    // Кнопка не "Назад", а "Закрыть список"
+    buttons.push([Markup.button.callback('❌ Закрыть список', 'close_menu')]);
 
+    // Отправляем новое сообщение
     ctx.reply('Нажми, чтобы вычеркнуть:', Markup.inlineKeyboard(buttons));
   },
 
@@ -76,6 +79,7 @@ module.exports = {
 
     // FIX: Не удаляем сообщение здесь вручную.
     // Мы просто вызываем list(ctx), который сам удалит старое сообщение и пришлет обновленное.
+    try { await ctx.deleteMessage(); } catch (e) { }
     await module.exports.list(ctx);
   },
 

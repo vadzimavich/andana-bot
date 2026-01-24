@@ -144,15 +144,16 @@ bot.command('menu', async (ctx) => {
 
   // Если это тема
   const topicId = ctx.message.message_thread_id;
-  if (!topicId) return ctx.reply('Это работает только внутри Темы.');
-
   const type = Settings.getTopicType(topicId);
+
+  // Удаляем сообщение с командой /menu, чтобы не засорять чат
+  try { await ctx.deleteMessage(); } catch (e) { }
 
   if (type === config.TOPICS.EXPENSES) return Finance.sendInterface(ctx);
   if (type === config.TOPICS.SHOPPING) return Shopping.sendInterface(ctx);
-  if (type === config.TOPICS.INBOX) return Tasks.sendInterface(ctx);
+  if (type === config.TOPICS.INBOX) return Tasks.sendInterface(ctx); // <--- ВОТ ЭТОГО НЕ ХВАТАЛО
 
-  return ctx.reply('⚠️ Эта тема не привязана. Используйте /link expenses (или shopping/inbox).');
+  return ctx.reply('⚠️ Эта тема не привязана. Используйте /link ...');
 });
 
 const handleUndo = async (ctx, sheetName, label) => {
@@ -194,6 +195,9 @@ bot.on('text', async (ctx) => {
     await Settings.init();
     cronJobs.init(bot);
     bot.launch().then(() => console.log('✅ AndanaBot V6 Running'));
+    app.get('/', (req, res) => {
+      res.send('AndanaBot is alive and watching you 👀');
+    });
     app.listen(config.PORT, () => console.log(`🌍 Web Server running on port ${config.PORT}`));
   } catch (e) {
     console.error('❌ Startup failed:', e);
