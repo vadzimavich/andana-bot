@@ -27,35 +27,36 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 // WEB ROUTES
-app.get('/', (req, res) => res.send('AndanaBot Alive')); // Uptime
+app.get('/', (req, res) => res.send('AndanaBot Alive'));
 
 app.get('/wishlist/:filter?', async (req, res) => {
   try {
-    const filterName = req.params.filter; // 'Андрей', 'Аня' или undefined
+    const filterName = req.params.filter;
 
-    // Читаем из таблицы
-    // Структура в листе Wishlist: Date, User, Title, Link, Image, Status
+    // Читаем A:F (6 колонок)
     const rows = await google.getSheetData('Wishlist', 'A:F');
 
-    // Преобразуем массив массивов в объекты
-    const items = rows.slice(1).map(r => ({
-      date: r[0]?.split(',')[0],
-      user: r[1],
-      title: r[2],
-      url: r[3],
-      img: r[4] || 'https://via.placeholder.com/300x200?text=No+Image',
-      status: r[5]
-    })).filter(item => item.status === 'Active'); // Показываем только активные
+    if (!rows || rows.length < 2) {
+      return res.render('wishlist', { items: [] });
+    }
 
-    // Фильтруем если надо
+    const items = rows.slice(1).map(r => ({
+      date: r[0]?.split(',')[0] || '',
+      user: r[1] || 'Anon',
+      title: r[2] || 'Без названия',
+      url: r[3] || '#',
+      img: r[4] || 'https://via.placeholder.com/300x200?text=No+Image',
+      status: r[5] || 'Active'
+    })).filter(item => item.status === 'Active');
+
     const filtered = filterName
       ? items.filter(i => i.user === decodeURIComponent(filterName))
       : items;
 
     res.render('wishlist', { items: filtered });
   } catch (e) {
-    console.error(e);
-    res.send('Ошибка загрузки вишлиста');
+    console.error('Web Error:', e);
+    res.status(500).send('Ошибка загрузки вишлиста (см. логи)');
   }
 });
 

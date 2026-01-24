@@ -8,7 +8,7 @@ const googleCreds = process.env.GOOGLE_CREDENTIALS_BASE64
   : null;
 
 module.exports = {
-  APP_URL: 'https://andana-bot-2.onrender.com/',
+  APP_URL: 'https://andana-bot-2.onrender.com',
   TELEGRAM_TOKEN: process.env.TELEGRAM_TOKEN,
   GEMINI_KEY: process.env.GEMINI_API_KEY,
   GOOGLE_CREDS: googleCreds,

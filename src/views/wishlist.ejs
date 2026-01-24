@@ -13,37 +13,41 @@
     <header class="mb-8 text-center">
       <h1 class="text-3xl font-bold text-gray-800">🎁 Наши Хотелки</h1>
       <div class="mt-4 space-x-2">
-        <a href="/wishlist" class="px-4 py-2 bg-blue-500 text-white rounded shadow">Все</a>
-        <a href="/wishlist/Андрей" class="px-4 py-2 bg-blue-500 text-white rounded shadow">Андрей</a>
-        <a href="/wishlist/Аня" class="px-4 py-2 bg-pink-500 text-white rounded shadow">Аня</a>
+        <a href="/wishlist" class="px-4 py-2 bg-blue-500 text-white rounded shadow hover:bg-blue-600">Все</a>
+        <a href="/wishlist/Андрей"
+          class="px-4 py-2 bg-green-500 text-white rounded shadow hover:bg-green-600">Андрей</a>
+        <a href="/wishlist/Аня" class="px-4 py-2 bg-pink-500 text-white rounded shadow hover:bg-pink-600">Аня</a>
       </div>
     </header>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-      <% items.forEach(item=> { %>
-        <div class="bg-white rounded-lg shadow-md overflow-hidden flex flex-col hover:shadow-lg transition">
-          <div class="h-48 overflow-hidden bg-gray-200">
-            <img src="<%= item.img %>" alt="<%= item.title %>" class="w-full h-full object-cover">
+      <% if (items && items.length> 0) { %>
+        <% items.forEach(item=> { %>
+          <div class="bg-white rounded-lg shadow-md overflow-hidden flex flex-col hover:shadow-lg transition">
+            <div class="h-48 overflow-hidden bg-gray-200 relative">
+              <img src="<%= item.img %>" alt="Товар" class="w-full h-full object-cover">
+            </div>
+            <div class="p-4 flex-1 flex flex-col">
+              <span class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">
+                <%= item.user %> • <%= item.date %>
+              </span>
+              <h2 class="text-lg font-semibold text-gray-900 mb-2 leading-tight flex-1 line-clamp-2">
+                <%= item.title %>
+              </h2>
+              <a href="<%= item.url %>" target="_blank"
+                class="mt-4 block w-full text-center bg-gray-900 text-white font-bold py-2 px-4 rounded hover:bg-gray-700 transition">
+                Купить
+              </a>
+            </div>
           </div>
-          <div class="p-4 flex-1 flex flex-col">
-            <span class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">
-              <%= item.user %> • <%= item.date %>
-            </span>
-            <h2 class="text-lg font-semibold text-gray-900 mb-2 leading-tight flex-1">
-              <%= item.title %>
-            </h2>
-            <a href="<%= item.url %>" target="_blank"
-              class="mt-4 block w-full text-center bg-gray-900 text-white font-bold py-2 px-4 rounded hover:bg-gray-700">
-              Купить / Перейти
-            </a>
-          </div>
-        </div>
-        <% }); %>
+          <% }); %>
+            <% } else { %>
+              <div class="col-span-full text-center text-gray-500 py-10">
+                <p class="text-xl">Список пуст 🤷‍♂️</p>
+                <p class="text-sm mt-2">Кинь ссылку в чат, чтобы добавить.</p>
+              </div>
+              <% } %>
     </div>
-
-    <% if (items.length===0) { %>
-      <p class="text-center text-gray-500 text-xl mt-10">Пока ничего не хочется :(</p>
-      <% } %>
   </div>
 </body>
 

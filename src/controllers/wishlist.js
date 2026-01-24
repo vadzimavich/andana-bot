@@ -1,51 +1,51 @@
 const { Markup } = require('telegraf');
 const google = require('../services/google');
 const meta = require('../services/metadata');
-const state = require('../state');
 const config = require('../config');
-const { clearChat } = require('../utils/helpers');
 
 module.exports = {
-  // Сюда роутим сообщения из темы "Хотелки"
   async handleTopicMessage(ctx) {
     const text = ctx.message.text;
 
-    // Удаление
     if (text === '/undo') {
       const success = await google.deleteLastRow('Wishlist');
-      return ctx.reply(success ? '🗑 Последняя хотелка удалена.' : '⚠️ Список пуст.');
+      return ctx.reply(success ? '🗑 Удалено.' : '⚠️ Пусто.');
     }
 
-    // Проверка на ссылку
+    // Ищем ссылку
     const urlMatch = text.match(/(https?:\/\/[^\s]+)/);
     if (urlMatch) {
-      const m = await ctx.reply('🔎 Ищу информацию о товаре...');
+      const m = await ctx.reply('🔎 Парсим товар...');
       const url = urlMatch[0];
-      const data = await meta.extractMeta(url);
 
-      // Записываем: Дата, Юзер, Название, Ссылка, Картинка, Статус
-      await google.appendRow('Wishlist', [
-        new Date().toLocaleString('ru-RU'),
-        ctx.userConfig.name,
-        data.title,
-        data.url,
-        data.image,
-        'Active'
-      ]);
+      try {
+        const data = await meta.extractMeta(url);
 
-      await ctx.deleteMessage(m.message_id);
-      // Ссылка на веб-страницу
-      const webLink = `${config.APP_URL}/wishlist/${ctx.from.id}`; // APP_URL настроим ниже
-      ctx.reply(`✨ Добавлено в вишлист!\n🏷 [${data.title}](${data.url})\n\n🌐 Смотреть вишлисты: ${webLink}`, { parse_mode: 'Markdown' });
+        await google.appendRow('Wishlist', [
+          new Date().toLocaleString('ru-RU'),
+          ctx.userConfig.name,
+          data.title || 'Товар',
+          data.url,
+          data.image || '',
+          'Active'
+        ]);
+
+        await ctx.deleteMessage(m.message_id).catch(() => { });
+
+        // Исправленный URL
+        const webLink = `${config.APP_URL}/wishlist`;
+        ctx.reply(`✨ Добавлено!\n🏷 [${data.title}](${data.url})\n\n🌐 ${webLink}`, { parse_mode: 'Markdown' });
+      } catch (e) {
+        console.error('Wishlist Error:', e);
+        await ctx.deleteMessage(m.message_id).catch(() => { });
+        ctx.reply('❌ Не удалось добавить товар. Попробуйте другую ссылку.');
+      }
     }
   },
 
-  // Пульт для темы
   async sendInterface(ctx) {
     const webLink = `${config.APP_URL}/wishlist`;
-    const text = `🎁 *Тема: Вишлисты (Хотелки)*\n\n` +
-      `Кидай сюда ссылки на товары с Wildberries, Ozon или любые другие.\n\n` +
-      `🌐 [Открыть красивый веб-каталог](${webLink})`;
+    const text = `🎁 *Тема: Вишлисты*\nКидай сюда ссылки.\n\n🌐 [Открыть каталог](${webLink})`;
 
     const keyboard = Markup.inlineKeyboard([
       [Markup.button.url('🌐 Открыть в браузере', webLink)],
@@ -57,7 +57,7 @@ module.exports = {
 
   async undo(ctx) {
     const success = await google.deleteLastRow('Wishlist');
-    const msg = success ? '🗑 Последняя хотелка удалена.' : '⚠️ Список пуст.';
+    const msg = success ? '🗑 Удалено.' : '⚠️ Пусто.';
     ctx.answerCbQuery(msg);
     ctx.reply(msg);
   }
