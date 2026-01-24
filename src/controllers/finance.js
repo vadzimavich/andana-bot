@@ -67,33 +67,38 @@ module.exports = {
   },
 
   // --- ОТЧЕТЫ ---
-  async report(ctx) {
+  async reportMenu(ctx) {
     await clearChat(ctx);
-    const m = await ctx.reply('📊 Анализирую финансы за текущий месяц...');
+    // Ищем доступные месяцы в таблице
+    const rows = await google.getSheetData('Finances', 'A:A');
+    const months = new Set();
+    rows.forEach(r => {
+      if (!r[0] || r[0] === 'Date') return;
+      const [d, m, y] = r[0].split(',')[0].split('.'); // 14.01.2026
+      if (m && y) months.add(`${m}.${y}`);
+    });
+
+    const buttons = Array.from(months).slice(-5).map(m => [Markup.button.callback(m, `rep_fin_${m}`)]);
+    buttons.push([Markup.button.callback('🔙 Отмена', 'cancel_scene')]);
+
+    ctx.reply('📅 Выберите месяц:', Markup.inlineKeyboard(buttons));
+  },
+
+  async generateReport(ctx, monthStr) {
+    // monthStr = "01.2026"
+    await clearChat(ctx);
+    const m = await ctx.reply(`📊 Строю отчет за ${monthStr}...`);
 
     const rows = await google.getSheetData('Finances', 'A:D');
-    const now = new Date();
-    const currentMonth = now.getMonth(); // 0-11
-    const currentYear = now.getFullYear();
-
-    const dailyTotals = {}; // { '1': 50, '2': 0, ... '31': 100 }
-    const categoryTotals = {}; // { 'Еда': 500, 'Дом': 200 }
+    const categoryTotals = {};
     let totalSum = 0;
-
-    // Инициализируем дни
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    for (let i = 1; i <= daysInMonth; i++) dailyTotals[i] = 0;
 
     rows.forEach(row => {
       if (!row[0] || row[0] === 'Date') return;
-      const [datePart] = row[0].split(',');
-      const [day, month, year] = datePart.split('.').map(Number);
-
-      if (month - 1 === currentMonth && year === currentYear) {
+      const datePart = row[0].split(',')[0]; // 14.01.2026
+      if (datePart.includes(monthStr)) {
         const amount = parseFloat(row[3]?.replace(',', '.') || 0);
         const cat = row[2] || 'Разное';
-
-        dailyTotals[day] += amount;
         categoryTotals[cat] = (categoryTotals[cat] || 0) + amount;
         totalSum += amount;
       }
@@ -101,35 +106,25 @@ module.exports = {
 
     if (totalSum === 0) {
       await ctx.deleteMessage(m.message_id);
-      return ctx.reply('В этом месяце трат не найдено.');
+      return ctx.reply('Трат не найдено.');
     }
 
-    // 1. Гистограмма по дням
-    const barBuffer = await charts.generateBarChart(
-      Object.keys(dailyTotals),
-      Object.values(dailyTotals),
-      'Траты по дням (BYN)'
-    );
-
-    // 2. Круговая по категориям
+    // Круговая диаграмма
     const pieBuffer = await charts.generatePieChart(
       Object.keys(categoryTotals),
       Object.values(categoryTotals),
-      'Структура расходов'
+      `Расходы ${monthStr}`
     );
 
-    // 3. Текст
-    let textReport = `💰 *Всего за месяц: ${totalSum.toFixed(2)} BYN*\n\n`;
+    let textReport = `💰 *Всего: ${totalSum.toFixed(2)} BYN*\n\n`;
     Object.entries(categoryTotals)
       .sort(([, a], [, b]) => b - a)
       .forEach(([cat, sum]) => {
-        textReport += `• ${cat}: ${sum.toFixed(2)} BYN\n`;
+        const percent = ((sum / totalSum) * 100).toFixed(1);
+        textReport += `• ${cat}: ${sum.toFixed(2)} BYN (${percent}%)\n`;
       });
 
     await ctx.deleteMessage(m.message_id);
-
-    // Отправляем альбом (группу медиа) или по очереди
-    await ctx.replyWithPhoto({ source: barBuffer });
     await ctx.replyWithPhoto({ source: pieBuffer }, { caption: textReport, parse_mode: 'Markdown' });
   },
 
@@ -137,7 +132,7 @@ module.exports = {
     const text = ctx.message.text || ctx.message.caption || '';
     const photo = ctx.message.photo;
 
-    // 1. ЕСЛИ ЭТО ФОТО
+    // 1. ФОТО (ЧЕК)
     if (photo) {
       const m = await ctx.reply('🔎 Ищу QR-код...');
       const fileId = photo[photo.length - 1].file_id;
@@ -150,27 +145,31 @@ module.exports = {
         if (qr) qrData = qr.data;
       } catch (e) { console.log('QR Error:', e.message); }
 
-      // --- ЛОГИКА QR ---
+      // Если QR найден
       if (qrData) {
-        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🔗 QR найден, запрашиваю iKassa...');
+        // Проверяем, ссылка ли это на iKassa
+        if (qrData.includes('ikassa')) {
+          await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🔗 QR найден, запрашиваю iKassa...');
+          const ui = qrData.split('/').pop();
+          const result = await parseIkassa(ui);
 
-        // Извлекаем УИ (если это ссылка - берем конец, если просто текст - берем как есть)
-        let ui = qrData.includes('/') ? qrData.split('/').pop() : qrData;
-
-        const result = await parseIkassa(ui);
-
-        if (result.success) {
-          await ctx.deleteMessage(m.message_id).catch(() => { });
-          return this.saveParsedReceipt(ctx, result, 'iKassa');
+          if (result.success) {
+            await ctx.deleteMessage(m.message_id).catch(() => { });
+            return this.saveParsedReceipt(ctx, result, 'iKassa');
+          } else {
+            // QR есть, но сайт не открылся -> ОШИБКА (не идем в AI)
+            await ctx.deleteMessage(m.message_id).catch(() => { });
+            return ctx.reply(`❌ QR найден (${ui}), но чек не загрузился.\nПопробуйте фото без QR для AI.`);
+          }
         } else {
-          // Если сайт не парсится (твое требование)
-          await ctx.deleteMessage(m.message_id).catch(() => { });
-          return ctx.reply(`❌ QR УИ - ${result.ui}.\n${result.url} не найден`);
+          // QR есть, но не iKassa -> Пробуем AI
+          await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🤖 QR не от iKassa. Пробую AI...');
         }
+      } else {
+        await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🤖 QR не найден. Читаю чек через AI...');
       }
 
-      // --- ЛОГИКА AI (если QR не найден) ---
-      await ctx.telegram.editMessageText(ctx.chat.id, m.message_id, null, '🤖 QR не найден. Подключаю ИИ...');
+      // Если дошли сюда -> используем AI
       try {
         const result = await ai.parseReceipt(link.href);
         await ctx.deleteMessage(m.message_id).catch(() => { });
@@ -184,26 +183,38 @@ module.exports = {
       return ctx.reply('😔 Не удалось распознать чек. Введите сумму текстом.');
     }
 
-    // 2. ЕСЛИ ЭТО ТЕКСТ (12.5 пиво)
-    const match = text.match(/^(\d+([.,]\d+)?)\s*(.*)/);
-    if (match) {
-      const amount = parseFloat(match[1].replace(',', '.'));
-      const comment = match[3].trim();
+    // 2. ТЕКСТ ("25 молоко" или "молоко 25")
+    // Регулярка ищет число в начале или в конце
+    const matchStart = text.match(/^(\d+([.,]\d+)?)\s+(.*)/);
+    const matchEnd = text.match(/(.*)\s+(\d+([.,]\d+)?)$/);
 
-      if (comment) {
-        await google.appendRow('Finances', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, 'Разное', amount, comment]);
-        return ctx.reply(`✅ Записано: ${amount} BYN [Разное] (${comment})`);
-      } else {
-        state.set(ctx.from.id, { scene: 'SPENT_CATEGORY', amount: amount });
-        return ctx.reply(`💸 ${amount} BYN. Категория?`, Markup.inlineKeyboard([
-          [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
-          [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
-          [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('📦 Другое', 'cat_Разное')]
-        ]));
-      }
+    if (matchStart || matchEnd) {
+      const amountStr = matchStart ? matchStart[1] : matchEnd[2];
+      const desc = matchStart ? matchStart[3] : matchEnd[1];
+      const amount = parseFloat(amountStr.replace(',', '.'));
+
+      // Спрашиваем у AI категорию
+      const aiResult = await ai.categorizeText(desc);
+      const category = aiResult?.category || 'Разное';
+
+      await google.appendRow('Finances', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, category, amount, desc]);
+      return ctx.reply(`✅ ${amount} BYN -> ${category} (${desc})`);
     }
 
-    // Если это команда /undo
+    // 3. ПРОСТО ЧИСЛО ("25")
+    const simpleNum = parseFloat(text.replace(',', '.'));
+    if (!isNaN(simpleNum) && !text.includes(' ')) {
+      state.set(ctx.from.id, { scene: 'SPENT_CATEGORY', amount: simpleNum });
+      return ctx.reply(`💸 ${simpleNum} BYN. Категория?`, Markup.inlineKeyboard([
+        [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
+        [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
+        [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('👗 Одежда', 'cat_Одежда')],
+        [Markup.button.callback('💅 Уход', 'cat_Уход'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
+        [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
+      ]));
+    }
+
+    // 4. UNDO
     if (text === '/undo') {
       const success = await google.deleteLastRow('Finances');
       return ctx.reply(success ? '🗑 Последняя запись удалена.' : '⚠️ Нечего удалять.');
@@ -214,6 +225,10 @@ module.exports = {
   async saveParsedReceipt(ctx, data, source) {
     let report = `🧾 *Чек обработан (${source}):*\n`;
     let totalSaved = 0;
+
+    // Если источник iKassa, у нас нет категорий. Просим AI их расставить (пакетом)
+    // Для экономии времени пока ставим "Еда" или "Разное", но в идеале можно прогнать названия через AI
+    // В текущей версии ставим дефолт, чтобы было быстро.
 
     for (const item of data.items) {
       const cat = item.category || 'Еда';
@@ -245,5 +260,21 @@ module.exports = {
     await clearChat(ctx);
 
     ctx.reply(`✅ Расход: ${amount} BYN [${category}]`);
-  }
+  },
+
+  async sendInterface(ctx) {
+    const text = `💸 *Управление Расходами*\n\n` +
+      `🔹 *Как добавить:* \n` +
+      `• Фото чека / QR\n` +
+      `• Текст: _"25.5 молоко"_\n` +
+      `• Число: _"25"_ (бот спросит категорию)\n\n` +
+      `🔹 *Команды:*`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('📊 Отчет за месяц', 'rep_fin_menu')],
+      [Markup.button.callback('🔙 Отменить последнее', 'undo_finance')] // Сделаем спец. экшен для этого
+    ]);
+
+    await ctx.replyWithMarkdown(text, keyboard);
+  },
 };

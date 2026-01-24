@@ -99,5 +99,21 @@ module.exports = {
     ctx.reply(`🛒 Добавлено: ${items.join(', ')}`);
   },
 
+  async sendInterface(ctx) {
+    // Получаем кол-во товаров
+    const rows = await google.getSheetData('Shopping', 'D:D');
+    const count = rows.slice(1).filter(r => r[0] !== 'Done').length;
 
+    const text = `🛒 *Список Покупок*\n\n` +
+      `Активных товаров: *${count}*\n\n` +
+      `🔹 *Как добавить:* Пиши товары списком (хлеб, молоко)\n` +
+      `🔹 *Как купить:* Нажми кнопку ниже`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('📋 Открыть список', 'shop_list')],
+      [Markup.button.callback('🔙 Отменить добавление', 'undo_shopping')]
+    ]);
+
+    await ctx.replyWithMarkdown(text, keyboard);
+  },
 };

@@ -1,6 +1,7 @@
 const { Telegraf } = require('telegraf');
 const express = require('express');
 const config = require('./config');
+const google = require('./services/google');
 const state = require('./state');
 const cronJobs = require('./cron');
 
@@ -110,8 +111,12 @@ bot.action('cancel_scene', async (ctx) => {
   await ctx.reply('Возврат в меню', keyboards.MainMenu);
 });
 
-bot.action('rep_finance', Finance.report);
-bot.action('rep_weight', Weight.report);
+bot.action('rep_fin_menu', Finance.reportMenu); // Меню месяцев
+bot.action(/^rep_fin_(.+)/, async (ctx) => {
+  const month = ctx.match[1];
+  await Finance.generateReport(ctx, month);
+});
+bot.action('rep_weight', General.callWeightReport);
 
 bot.action(/set_toggle_(.+)/, Settings.toggle);
 bot.action(/set_ask_(.+)/, Settings.askTime);
@@ -132,14 +137,34 @@ bot.action(/^cat_(.+)/, Finance.actionCategory);
 bot.command('models', Finance.debugModels);
 
 bot.command('menu', async (ctx) => {
+  // Если это личка - шлем главное меню
+  if (ctx.chat.type === 'private') {
+    return ctx.reply('Главное меню:', require('./keyboards').MainMenu);
+  }
+
+  // Если это тема
   const topicId = ctx.message.message_thread_id;
+  if (!topicId) return ctx.reply('Это работает только внутри Темы.');
+
   const type = Settings.getTopicType(topicId);
 
-  if (type === 'expenses') {
-    return ctx.reply("💸 *Тема: Расходы*\n\n• Просто пиши число и товар\n• Кидай фото чека/QR\n• /undo — отмена", Markup.inlineKeyboard([[Markup.button.callback('📊 Отчет', 'rep_finance')]]));
-  }
-  // ... и так далее для других тем
+  if (type === config.TOPICS.EXPENSES) return Finance.sendInterface(ctx);
+  if (type === config.TOPICS.SHOPPING) return Shopping.sendInterface(ctx);
+  if (type === config.TOPICS.INBOX) return Tasks.sendInterface(ctx);
+
+  return ctx.reply('⚠️ Эта тема не привязана. Используйте /link expenses (или shopping/inbox).');
 });
+
+const handleUndo = async (ctx, sheetName, label) => {
+  const success = await google.deleteLastRow(sheetName);
+  const msg = success ? `🗑 Последняя запись в *${label}* удалена.` : `⚠️ ${label} пуст.`;
+  await ctx.answerCbQuery(msg); // Всплывашка
+  await ctx.replyWithMarkdown(msg); // Сообщение
+};
+
+bot.action('undo_finance', (ctx) => handleUndo(ctx, 'Finances', 'Расходах'));
+bot.action('undo_shopping', (ctx) => handleUndo(ctx, 'Shopping', 'Покупках'));
+bot.action('undo_task', (ctx) => handleUndo(ctx, 'Inbox', 'Задачах'));
 
 // --- TEXT ---
 bot.on('text', async (ctx) => {

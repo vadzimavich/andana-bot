@@ -5,6 +5,7 @@ const externalService = require('./services/external');
 const google = require('./services/google');
 const Settings = require('./controllers/settings');
 const Weight = require('./controllers/weight');
+const Finance = require('./controllers/finance');
 
 let tasks = [];
 
@@ -89,6 +90,31 @@ const startJobs = (bot) => {
     }, { timezone: "Europe/Minsk" });
     tasks.push(task);
   }
+
+  // 3. КОНЕЦ МЕСЯЦА (Авто-отчет)
+  // Запускаем в 23:55 в последний день месяца
+  const endMonthTask = cron.schedule('55 23 28-31 * *', async () => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    // Если завтра 1-е число, значит сегодня последний день
+    if (tomorrow.getDate() === 1) {
+      const monthStr = `${String(today.getMonth() + 1).padStart(2, '0')}.${today.getFullYear()}`;
+
+      // Создаем фейковый контекст для отправки отчета
+      const ctx = {
+        reply: (text) => bot.telegram.sendMessage(config.CHAT_HQ_ID, text),
+        replyWithPhoto: (photo, opts) => bot.telegram.sendPhoto(config.CHAT_HQ_ID, photo.source, opts),
+        deleteMessage: () => { }, // Заглушка
+        userConfig: { name: 'System' }
+      };
+
+      await bot.telegram.sendMessage(config.CHAT_HQ_ID, `📅 Месяц ${monthStr} завершен! Итоги:`);
+      await Finance.generateReport(ctx, monthStr);
+    }
+  }, { timezone: "Europe/Minsk" });
+  tasks.push(endMonthTask);
 };
 
 let botInstance = null;

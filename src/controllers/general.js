@@ -1,15 +1,13 @@
 const Finance = require('./finance');
 const Weight = require('./weight');
-const Settings = require('./settings');
 const reportService = require('../services/report');
 const keyboards = require('../keyboards');
 const { Markup } = require('telegraf');
 const { clearChat } = require('../utils/helpers');
 
-// Хелпер приватности
 const checkPrivate = (ctx) => {
   if (ctx.chat.type !== 'private') {
-    ctx.reply('🔒 Эту информацию можно смотреть только в личном чате с ботом.');
+    ctx.reply('🔒 Только в личке.');
     return false;
   }
   return true;
@@ -59,7 +57,8 @@ _Команды:_
 /undo - Отменить последнее действие (в темах)
 /link - Привязать тему (внутри темы)
 `;
-    ctx.replyWithMarkdown(msg, keyboards.MainMenu);
+    await clearChat(ctx);
+    ctx.replyWithMarkdown('🤖 Гайд...', keyboards.MainMenu);
   },
 
   async schedule(ctx) {
@@ -71,26 +70,28 @@ _Команды:_
 
     ctx.reply('🔎 Загружаю план...');
 
-    const msg = await reportService.getDailyReport(
-      targetDate,
-      ctx.from.id,
-      ctx.chat.type === 'private'
-    );
-
+    const msg = await reportService.getDailyReport(new Date(), ctx.from.id, ctx.chat.type === 'private');
     ctx.replyWithMarkdown(msg, keyboards.MainMenu);
   },
 
   async reportMenu(ctx) {
-    if (!checkPrivate(ctx)) return;
-
     await clearChat(ctx);
-    ctx.reply('📊 Какую статистику показать?', Markup.inlineKeyboard([
-      [Markup.button.callback('💰 Финансы (Месяц)', 'rep_finance')],
-      [Markup.button.callback('⚖️ Вес (График)', 'rep_weight')],
-      [Markup.button.callback('🔙 Отмена', 'cancel_scene')]
-    ]));
+    const isPrivate = ctx.chat.type === 'private';
+    const buttons = [];
+
+    // Финансы ведут в подменю выбора месяца
+    buttons.push([Markup.button.callback('💰 Финансы (Выбор месяца)', 'rep_fin_menu')]);
+
+    if (isPrivate) {
+      buttons.push([Markup.button.callback('⚖️ Вес (График)', 'rep_weight')]);
+    }
+
+    buttons.push([Markup.button.callback('🔙 Отмена', 'cancel_scene')]);
+    ctx.reply('📊 Отчеты:', Markup.inlineKeyboard(buttons));
   },
 
-  async callFinanceReport(ctx) { await Finance.report(ctx); },
-  async callWeightReport(ctx) { await Weight.report(ctx); }
+  async callWeightReport(ctx) {
+    if (!checkPrivate(ctx)) return;
+    await Weight.report(ctx);
+  }
 };

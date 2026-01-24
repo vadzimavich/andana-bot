@@ -15,6 +15,7 @@ async function getAvailableModels() {
     return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}`;
   }
 }
+
 async function parseReceipt(imageUrl) {
   if (!genAI) return { error: "API Key not configured" };
 
@@ -46,17 +47,16 @@ async function parseReceipt(imageUrl) {
 async function categorizeText(text) {
   if (!genAI) return null;
   try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     const prompt = `
-            Текст: "${text}".
-            Это расход. Определи категорию строго из списка: Еда, Дом, Транспорт, Здоровье, Одежда, Уход и красота, Развлечения, Алкоголь, Платежи, Разное.
-            Верни JSON: {"category": "...", "item": "...", "amount": число_если_есть_иначе_null}
+            Categorize this expense item: "${text}".
+            Categories: Еда, Дом, Транспорт, Здоровье, Одежда, Уход, Развлечения, Алкоголь, Платежи, Разное.
+            Return JSON: {"category": "CategoryName"}
         `;
-    const textResp = await tryGenerate(prompt);
-    const json = textResp.replace(/```json|```/g, '').trim();
+    const result = await model.generateContent(prompt);
+    const json = result.response.text().replace(/```json|```/g, '').trim();
     return JSON.parse(json);
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { return null; }
 }
 
 module.exports = { parseReceipt, categorizeText, getAvailableModels };
