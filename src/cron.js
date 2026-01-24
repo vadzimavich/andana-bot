@@ -6,6 +6,7 @@ const google = require('./services/google');
 const Settings = require('./controllers/settings');
 const Weight = require('./controllers/weight');
 const Finance = require('./controllers/finance');
+const ai = require('./services/ai');
 
 let tasks = [];
 
@@ -115,6 +116,48 @@ const startJobs = (bot) => {
     }
   }, { timezone: "Europe/Minsk" });
   tasks.push(endMonthTask);
+
+
+  // 4. НЕДЕЛЬНЫЙ ОТЧЕТ (Воскресенье 21:00)
+  // У тебя был выключен, включим
+  const weeklySchedule = `0 21 * * 0`;
+
+  const weeklyTask = cron.schedule(weeklySchedule, async () => {
+    try {
+      // 1. Собираем суммы за 7 дней
+      const rows = await google.getSheetData('Finances', 'A:D');
+      const now = new Date();
+      const weekAgo = new Date();
+      weekAgo.setDate(now.getDate() - 7);
+
+      let total = 0;
+      let summary = "";
+      const cats = {};
+
+      rows.forEach(r => {
+        if (!r[0] || r[0] === 'Date') return;
+        const [d, m, y] = r[0].split(',')[0].split('.').map(Number);
+        const date = new Date(y, m - 1, d);
+
+        if (date >= weekAgo) {
+          const amount = parseFloat(r[3].replace(',', '.'));
+          cats[r[2]] = (cats[r[2]] || 0) + amount;
+          total += amount;
+        }
+      });
+
+      for (const [c, s] of Object.entries(cats)) summary += `${c}: ${s} BYN\n`;
+
+      // 2. Отправляем ИИ
+      const aiComment = await ai.analyzeFinances(summary);
+
+      const msg = `📅 *Итоги недели*\nПотрачено: ${total.toFixed(2)} BYN\n\n${aiComment}`;
+
+      await bot.telegram.sendMessage(config.CHAT_HQ_ID, msg, { parse_mode: 'Markdown' });
+
+    } catch (e) { console.error('Weekly Error', e); }
+  }, { timezone: "Europe/Minsk" });
+  tasks.push(weeklyTask);
 };
 
 let botInstance = null;

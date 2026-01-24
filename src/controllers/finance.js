@@ -19,13 +19,6 @@ module.exports = {
     state.addMsgToDelete(ctx.from.id, m.message_id);
   },
 
-  async debugModels(ctx) {
-    const m = await ctx.reply('📡 Спрашиваю у Google доступные модели...');
-    const list = await ai.getAvailableModels();
-    try { await ctx.deleteMessage(m.message_id); } catch (e) { }
-    await ctx.reply(`🤖 Ответ Google:\n\n${list}`);
-  },
-
   async handleText(ctx) {
     const s = state.get(ctx.from.id);
     const text = ctx.message.text;

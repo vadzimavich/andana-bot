@@ -19,6 +19,8 @@
     "googleapis": "^144.x.x",
     "node-cron": "^3.x.x",
     "telegraf": "^4.x.x",
-    "@google/generative-ai": "^0.21.0"
+    "@google/generative-ai": "^0.21.0",
+    "open-graph-scraper": "^6.x.x",
+    "ejs": "^3.x.x"
   }
 }

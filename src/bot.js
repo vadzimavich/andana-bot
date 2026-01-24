@@ -13,11 +13,59 @@ const Finance = require('./controllers/finance');
 const Weight = require('./controllers/weight');
 const Plan = require('./controllers/plan');
 const Settings = require('./controllers/settings');
+const Wishlist = require('./controllers/wishlist');
+
+const path = require('path'); // Node standard lib
 
 const bot = new Telegraf(config.TELEGRAM_TOKEN);
 const app = express();
 
 const isPrivate = (ctx) => ctx.chat.type === 'private';
+
+// НАСТРОЙКА VIEW ENGINE
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+
+// WEB ROUTES
+app.get('/', (req, res) => res.send('AndanaBot Alive')); // Uptime
+
+app.get('/wishlist/:filter?', async (req, res) => {
+  try {
+    const filterName = req.params.filter; // 'Андрей', 'Аня' или undefined
+
+    // Читаем из таблицы
+    // Структура в листе Wishlist: Date, User, Title, Link, Image, Status
+    const rows = await google.getSheetData('Wishlist', 'A:F');
+
+    // Преобразуем массив массивов в объекты
+    const items = rows.slice(1).map(r => ({
+      date: r[0]?.split(',')[0],
+      user: r[1],
+      title: r[2],
+      url: r[3],
+      img: r[4] || 'https://via.placeholder.com/300x200?text=No+Image',
+      status: r[5]
+    })).filter(item => item.status === 'Active'); // Показываем только активные
+
+    // Фильтруем если надо
+    const filtered = filterName
+      ? items.filter(i => i.user === decodeURIComponent(filterName))
+      : items;
+
+    res.render('wishlist', { items: filtered });
+  } catch (e) {
+    console.error(e);
+    res.send('Ошибка загрузки вишлиста');
+  }
+});
+
+// TV WEBHOOK (Для будущего управления ТВ)
+app.post('/webhook/tv', express.json(), (req, res) => {
+  const { action, data } = req.body;
+  console.log(`📺 TV Command received: ${action}`, data);
+  // Тут в будущем можно отправлять MQTT сообщение или WebSocket в Home Assistant
+  res.send({ status: 'ok', command: action });
+});
 
 bot.use(async (ctx, next) => {
   const userId = ctx.from?.id;
@@ -34,7 +82,7 @@ bot.on('message', async (ctx, next) => {
     if (ctx.message.text?.startsWith('/link')) return Settings.linkTopic(ctx);
     return next();
   }
-
+  if (topicType === config.TOPICS.IDEAS) return Wishlist.handleTopicMessage(ctx);
   const topicId = ctx.message.message_thread_id;
   const topicType = Settings.getTopicType(topicId);
 
@@ -44,6 +92,7 @@ bot.on('message', async (ctx, next) => {
   if (topicType === config.TOPICS.SHOPPING) return Shopping.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.INBOX) return Tasks.handleTopicMessage(ctx);
   // if (topicType === config.TOPICS.IDEAS) return Thoughts.handleTopicMessage(ctx);
+  if (topicType === config.TOPICS.WISHLIST) return Wishlist.handleTopicMessage(ctx);
 
   return next();
 });
@@ -158,6 +207,7 @@ bot.command('menu', async (ctx) => {
   if (type === config.TOPICS.EXPENSES) return Finance.sendInterface(ctx);
   if (type === config.TOPICS.SHOPPING) return Shopping.sendInterface(ctx);
   if (type === config.TOPICS.INBOX) return Tasks.sendInterface(ctx); // <--- ВОТ ЭТОГО НЕ ХВАТАЛО
+  if (type === config.TOPICS.WISHLIST) return Wishlist.sendInterface(ctx);
 
   return ctx.reply('⚠️ Эта тема не привязана. Используйте /link ...');
 });
@@ -172,6 +222,7 @@ const handleUndo = async (ctx, sheetName, label) => {
 bot.action('undo_finance', (ctx) => handleUndo(ctx, 'Finances', 'Расходах'));
 bot.action('undo_shopping', (ctx) => handleUndo(ctx, 'Shopping', 'Покупках'));
 bot.action('undo_task', (ctx) => handleUndo(ctx, 'Inbox', 'Задачах'));
+bot.action('wishlist_undo', Wishlist.undo);
 
 // --- TEXT ---
 bot.on('text', async (ctx) => {

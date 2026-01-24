@@ -4,15 +4,20 @@ const axios = require('axios');
 
 const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : null;
 
-// --- ОТЛАДКА ---
-async function getAvailableModels() {
-  if (!config.GEMINI_KEY) return "Нет API ключа";
+// Используем модель со скрина. 
+// Если появится 2.0-flash-lite - переходи на нее, там лимиты обычно выше.
+const MODEL_NAME = "gemini-2.5-flash";
+
+async function tryGenerate(prompt, imagePart = null) {
+  if (!genAI) throw new Error("API Key missing");
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.GEMINI_KEY}`;
-    const res = await axios.get(url);
-    return res.data.models.map(m => m.name).join('\n');
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+    const content = imagePart ? [prompt, imagePart] : [prompt];
+    const result = await model.generateContent(content);
+    return result.response.text();
   } catch (e) {
-    return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}`;
+    console.error(`AI Error (${MODEL_NAME}):`, e.message);
+    return null; // Возвращаем null при ошибке квоты
   }
 }
 
@@ -23,40 +28,55 @@ async function parseReceipt(imageUrl) {
     const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     const imageBuffer = Buffer.from(response.data);
 
-    // Включаем JSON mode для модели
-
     const prompt = `
-            Проанализируй чек.
-            1. Верни общую сумму (total).
-            2. Список товаров (items): категория (category), сумма (sum), описание (desc).
-            Категории строго из списка: Еда, Дом, Транспорт, Здоровье, Одежда, Уход и красота, Развлечения, Алкоголь, Платежи, Разное.
-            Верни ТОЛЬКО JSON. Пример: {"total": 100, "items": [{"category": "Еда", "sum": 100, "desc": "Молоко"}]}
+            Analyze receipt.
+            Return JSON: {"total": number, "items": [{"category": "Еда|Дом|Транспорт|Здоровье|Одежда|Уход|Развлечения|Алкоголь|Платежи|Разное", "sum": number, "desc": "string"}]}
         `;
 
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } }
-    ]);
+    const text = await tryGenerate(prompt, { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } });
+    if (!text) return { error: "Лимит AI исчерпан на сегодня" };
 
-    return JSON.parse(result.response.text());
+    const jsonStr = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(jsonStr);
   } catch (error) {
-    return { error: "AI Error: " + error.message };
+    return { error: "Ошибка парсинга" };
   }
 }
 
 async function categorizeText(text) {
+  // ЭКОНОМИЯ: Сначала пробуем простые словари, чтобы не тратить квоту
+  const lower = text.toLowerCase();
+  if (lower.match(/пив|вин|водк|коньяк/)) return { category: 'Алкоголь' };
+  if (lower.match(/молок|хлеб|яйц|сыр|мяс|куриц|вод/)) return { category: 'Еда' };
+  if (lower.match(/бензин|uber|yandex|яндекс|такси|проезд/)) return { category: 'Транспорт' };
+
+  // Если не угадали - идем к AI
   if (!genAI) return null;
+
+  const prompt = `Categorize expense: "${text}". Categories: Еда, Дом, Транспорт, Здоровье, Одежда, Уход, Развлечения, Алкоголь, Платежи, Разное. JSON: {"category": "Name"}`;
+
+  const textResp = await tryGenerate(prompt);
+  if (!textResp) return { category: 'Разное' }; // Fallback
+
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const prompt = `
-            Categorize this expense item: "${text}".
-            Categories: Еда, Дом, Транспорт, Здоровье, Одежда, Уход, Развлечения, Алкоголь, Платежи, Разное.
-            Return JSON: {"category": "CategoryName"}
-        `;
-    const result = await model.generateContent(prompt);
-    const json = result.response.text().replace(/```json|```/g, '').trim();
+    const json = textResp.replace(/```json|```/g, '').trim();
     return JSON.parse(json);
-  } catch (e) { return null; }
+  } catch (e) { return { category: 'Разное' }; }
 }
 
-module.exports = { parseReceipt, categorizeText, getAvailableModels };
+// Новая фича: Еженедельный аналитик (тратит 1 запрос в неделю!)
+async function analyzeFinances(summaryText) {
+  if (!genAI) return "Аналитик в отпуске.";
+  const prompt = `
+        Ты саркастичный финансовый консультант.
+        Вот траты семьи за неделю:
+        ${summaryText}
+        
+        Дай краткий (2-3 предложения) комментарий: похвали или поругай.
+        Используй emoji.
+    `;
+  const res = await tryGenerate(prompt);
+  return res || "Берегите деньги!";
+}
+
+module.exports = { parseReceipt, categorizeText, analyzeFinances };
