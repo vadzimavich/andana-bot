@@ -83,16 +83,19 @@ bot.on('message', async (ctx, next) => {
     if (ctx.message.text?.startsWith('/link')) return Settings.linkTopic(ctx);
     return next();
   }
-  if (topicType === config.TOPICS.IDEAS) return Wishlist.handleTopicMessage(ctx);
+
+  // 1. Сначала объявляем переменные
   const topicId = ctx.message.message_thread_id;
   const topicType = Settings.getTopicType(topicId);
 
+  // 2. Потом проверяем
   if (!topicType) return next();
 
+  // 3. Потом роутим
   if (topicType === config.TOPICS.EXPENSES) return Finance.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.SHOPPING) return Shopping.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.INBOX) return Tasks.handleTopicMessage(ctx);
-  // if (topicType === config.TOPICS.IDEAS) return Thoughts.handleTopicMessage(ctx);
+  // Обрати внимание: в config.js у тебя 'wishlist', а не 'ideas'
   if (topicType === config.TOPICS.WISHLIST) return Wishlist.handleTopicMessage(ctx);
 
   return next();
