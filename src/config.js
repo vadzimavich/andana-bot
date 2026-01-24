@@ -30,7 +30,8 @@ module.exports = {
     EXPENSES: 'expenses',
     SHOPPING: 'shopping',
     INBOX: 'inbox',
-    IDEAS: 'ideas'
+    IDEAS: 'ideas',
+    WISHLIST: 'wishlist'
   },
 
   CRON_DEFAULTS: {
