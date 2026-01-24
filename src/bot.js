@@ -105,10 +105,16 @@ bot.action('close_menu', async (ctx) => {
 });
 
 bot.action('cancel_scene', async (ctx) => {
-  await clearChat(ctx);
+  // Сначала говорим Телеграму "ОК", чтобы убрать часики загрузки
+  await ctx.answerCbQuery('Отменено');
+
+  const { clearChat } = require('./utils/helpers');
+
+  // Явно удаляем сообщение, на котором нажали кнопку
   try { await ctx.deleteMessage(); } catch (e) { }
-  // ВОЗВРАЩАЕМ МЕНЮ
-  await ctx.reply('Возврат в меню', keyboards.MainMenu);
+
+  // Чистим историю вопросов бота
+  await clearChat(ctx);
 });
 
 bot.action('rep_fin_menu', Finance.reportMenu); // Меню месяцев

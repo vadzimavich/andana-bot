@@ -69,25 +69,30 @@ module.exports = {
 
   // --- ОТЧЕТЫ ---
   async reportMenu(ctx) {
+    // Удаляем предыдущие сообщения, если нужно
     await clearChat(ctx);
-    // Ищем доступные месяцы в таблице
+
+    // Ищем доступные месяцы
     const rows = await google.getSheetData('Finances', 'A:A');
     const months = new Set();
     rows.forEach(r => {
       if (!r[0] || r[0] === 'Date') return;
-      const [d, m, y] = r[0].split(',')[0].split('.'); // 14.01.2026
+      const [d, m, y] = r[0].split(',')[0].split('.');
       if (m && y) months.add(`${m}.${y}`);
     });
 
     const buttons = Array.from(months).slice(-5).map(m => [Markup.button.callback(m, `rep_fin_${m}`)]);
-    buttons.push([Markup.button.callback('🔙 Отмена', 'cancel_scene')]);
+
+    // УБРАЛИ кнопку "Отмена", как ты просил.
+    // Меню закроется само при выборе месяца (см. generateReport ниже)
 
     ctx.reply('📅 Выберите месяц:', Markup.inlineKeyboard(buttons));
   },
 
   async generateReport(ctx, monthStr) {
-    // monthStr = "01.2026"
-    await clearChat(ctx);
+    // УДАЛЯЕМ МЕНЮ ВЫБОРА МЕСЯЦА
+    try { await ctx.deleteMessage(); } catch (e) { }
+
     const m = await ctx.reply(`📊 Строю отчет за ${monthStr}...`);
 
     const rows = await google.getSheetData('Finances', 'A:D');
@@ -96,7 +101,7 @@ module.exports = {
 
     rows.forEach(row => {
       if (!row[0] || row[0] === 'Date') return;
-      const datePart = row[0].split(',')[0]; // 14.01.2026
+      const datePart = row[0].split(',')[0];
       if (datePart.includes(monthStr)) {
         const amount = parseFloat(row[3]?.replace(',', '.') || 0);
         const cat = row[2] || 'Разное';
@@ -110,7 +115,6 @@ module.exports = {
       return ctx.reply('Трат не найдено.');
     }
 
-    // Круговая диаграмма
     const pieBuffer = await charts.generatePieChart(
       Object.keys(categoryTotals),
       Object.values(categoryTotals),

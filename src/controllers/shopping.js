@@ -86,12 +86,15 @@ module.exports = {
   async handleTopicMessage(ctx) {
     const text = ctx.message.text;
 
+    // ВАЖНЫЙ ФИКС: Если это служебное сообщение (закреп, вход в группу) или картинка без подписи
+    // text будет undefined. Игнорируем такие сообщения.
+    if (!text) return;
+
     if (text === '/undo') {
       const success = await google.deleteLastRow('Shopping');
       return ctx.reply(success ? '🗑 Последний товар удален.' : '⚠️ Список пуст.');
     }
 
-    // Добавляем всё, что написано, как товары (через запятую или новую строку)
     const items = text.split(/[\n,]/).map(i => i.trim()).filter(i => i);
 
     if (items.length === 0) return;
