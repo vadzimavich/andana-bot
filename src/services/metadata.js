@@ -5,38 +5,54 @@ async function extractMeta(url) {
   try {
     console.log('📥 Начинаю парсинг ссылки:', url);
 
-    // 1. Сначала пробуем стандартный Open Graph (отлично для Ali и др.)
+    // 1. Сначала пробуем стандартный Open Graph
+    // Это должно работать для AliExpress, YouTube и большинства сайтов
     const options = {
       url: url,
-      timeout: 10000,
+      timeout: 15000,
       fetchOptions: {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' }
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+          'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+        }
       }
     };
 
-    const { result } = await ogs(options);
+    let ogData = {};
+    try {
+      const { result } = await ogs(options);
+      ogData = result;
+    } catch (e) {
+      console.log('OGS failed, trying AI fallback...');
+    }
 
-    let title = result.ogTitle || result.twitterTitle;
-    let image = result.ogImage?.[0]?.url || result.ogImage?.url;
+    let title = ogData.ogTitle || ogData.twitterTitle;
+    let image = ogData.ogImage?.[0]?.url || ogData.ogImage?.url;
 
-    // 2. Если это WB/Ozon или стандартный парсер не нашел данных — идем в AI
-    const isHardSite = url.includes('wildberries') || url.includes('ozon') || url.includes('wb.ru');
+    // Проверка на "плохой" результат (WB/Ozon часто отдают капчу вместо контента)
+    const isBadResult = !title || title.includes('Just a moment') || title.includes('Access Denied') || title.includes('Ой!');
+    const isMarketplace = url.includes('wildberries') || url.includes('ozon') || url.includes('wb.ru');
 
-    if (isHardSite || !title || !image) {
-      console.log('🤖 Магазин с защитой или данных нет. Запускаю Gemini...');
+    // 2. Если OGS не справился или это маркетплейс с защитой — идем в AI
+    if (isBadResult || isMarketplace) {
+      console.log('🤖 Запускаю Gemini для парсинга...');
 
       const prompt = `
-        Проанализируй ссылку на товар: "${url}". 
-        Это интернет-магазин. Найди название товара и прямую ссылку на его главную картинку.
-        Верни ТОЛЬКО JSON: {"title": "Название", "image": "URL картинки"}.
-        Если не уверен в картинке, попробуй найти её в мета-данных или верни заглушку.
+        Extract product info from this URL: "${url}".
+        Return JSON: {"title": "Product Name", "image": "Image URL"}.
+        If you can't access the URL, try to guess the product name from the URL structure itself.
+        For image, use a generic placeholder if not found.
       `;
 
-      const aiResponse = await ai.tryGenerate(prompt);
-      if (aiResponse) {
-        const data = JSON.parse(aiResponse.replace(/```json|```/g, '').trim());
-        title = data.title || title;
-        image = data.image || image;
+      try {
+        const aiResponse = await ai.tryGenerate(prompt);
+        if (aiResponse) {
+          const data = JSON.parse(aiResponse.replace(/```json|```/g, '').trim());
+          title = data.title || title;
+          image = data.image || image;
+        }
+      } catch (aiError) {
+        console.error('AI Parsing failed:', aiError.message);
       }
     }
 
@@ -47,8 +63,8 @@ async function extractMeta(url) {
     };
 
   } catch (e) {
-    console.error('❌ Ошибка парсера метаданных:', e.message);
-    return { title: 'Товар', image: 'https://via.placeholder.com/400', url };
+    console.error('❌ Critical Meta Error:', e.message);
+    return { title: 'Ссылка', image: 'https://via.placeholder.com/400', url };
   }
 }
 

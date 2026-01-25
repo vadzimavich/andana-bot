@@ -2,7 +2,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const pdf = require('pdf-parse');
 
-// Парсинг iKassa (HTML)
+// iKassa
 async function parseIkassa(ui) {
   const url = `https://receipts.cloud.ikassa.by/render/${ui}`;
   try {
@@ -10,6 +10,7 @@ async function parseIkassa(ui) {
     const $ = cheerio.load(data);
     const items = [];
     let total = 0;
+
     $('#receiptBody pre').each((i, el) => {
       const text = $(el).text().trim();
       if (text.includes('*')) {
@@ -23,11 +24,13 @@ async function parseIkassa(ui) {
         if (match) total = parseFloat(match[0].replace(',', '.'));
       }
     });
+
+    if (total === 0) total = items.reduce((acc, curr) => acc + curr.sum, 0);
     return { success: true, total: total.toFixed(2), items, url, source: 'iKassa' };
   } catch (e) { return { success: false, url }; }
 }
 
-// Парсинг Евроопта (PDF через API)
+// Euroopt
 async function parseEplus(url) {
   try {
     const guid = url.split('/').pop();
@@ -45,11 +48,14 @@ async function parseEplus(url) {
       responseType: 'arraybuffer',
       timeout: 15000,
       headers: {
+        'Accept': 'application/json, text/plain, */*',
         'Content-Type': 'application/json',
         'Origin': 'https://r.eplus.by',
         'Referer': 'https://r.eplus.by/',
-        'Host': 'rest.eurotorg.by',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"'
       }
     });
 
@@ -59,7 +65,6 @@ async function parseEplus(url) {
     let total = 0;
 
     lines.forEach((line, i) => {
-      // Ищем строку с ценой: "Цена x Кол-во Сумма"
       const match = line.match(/(\d+[.,]\d{2})\s*[x*]\s*([\d.,]+)\s+(\d+[.,]\d{2})$/);
       if (match) {
         let name = line.substring(0, match.index).trim();

@@ -8,6 +8,20 @@ const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : nu
 // Если появится 2.0-flash-lite - переходи на нее, там лимиты обычно выше.
 const MODEL_NAME = "gemini-2.5-flash";
 
+
+// --- ОТЛАДКА ---
+async function getAvailableModels() {
+  if (!config.GEMINI_KEY) return "Нет API ключа";
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.GEMINI_KEY}`;
+    const res = await axios.get(url);
+    return res.data.models.map(m => m.name).join('\n');
+  } catch (e) {
+    return `Ошибка Google API: ${e.response?.status} ${e.response?.statusText}`;
+  }
+}
+
+
 async function tryGenerate(prompt, imagePart = null) {
   if (!genAI) throw new Error("API Key missing");
   try {
@@ -79,4 +93,5 @@ async function analyzeFinances(summaryText) {
   return res || "Берегите деньги!";
 }
 
-module.exports = { parseReceipt, categorizeText, analyzeFinances };
+// ВАЖНО: Добавил tryGenerate в экспорт
+module.exports = { parseReceipt, categorizeText, analyzeFinances, getAvailableModels, tryGenerate };
