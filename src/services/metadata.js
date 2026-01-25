@@ -1,23 +1,17 @@
 const axios = require('axios');
 const config = require('../config');
 
-// Хелпер для прокси с опциями
-function getProxyUrl(targetUrl, options = {}) {
+// Хелпер для прокси. Теперь он просто и надежно формирует URL.
+function getProxyUrl(targetUrl) {
   if (!config.SCRAPER_API_KEY) {
-    console.log('⚠️ ScraperAPI key not found, using direct request.');
+    console.log('⚠️ ScraperAPI key not found, using direct request. This will likely fail.');
     return targetUrl;
   }
-
   const params = new URLSearchParams({
     api_key: config.SCRAPER_API_KEY,
     url: targetUrl,
+    country_code: 'by' // Явно указываем, что мы из Беларуси
   });
-
-  // Если нужна эмуляция браузера
-  if (options.render) {
-    params.append('render', 'true');
-  }
-
   return `http://api.scraperapi.com?${params.toString()}`;
 }
 
@@ -26,10 +20,9 @@ async function parseGoldApple(url) {
     const slug = url.split('/').pop().split('?')[0];
     const apiUrl = `https://goldapple.by/it_api/v1/catalog/product/by-url?url=${slug}`;
 
-    console.log('🍏 GoldApple Fetch (via Proxy)...');
+    console.log('🍏 GoldApple API Fetch:', apiUrl);
 
-    // Для API рендеринг не нужен
-    const { data } = await axios.get(getProxyUrl(apiUrl), { timeout: 15000 });
+    const { data } = await axios.get(getProxyUrl(apiUrl), { timeout: 20000 });
 
     const product = data.data;
     return {
@@ -38,31 +31,61 @@ async function parseGoldApple(url) {
       url: url
     };
   } catch (e) {
-    console.error('❌ GoldApple Error:', e.response ? `Status ${e.response.status}` : e.message);
+    console.error('❌ GoldApple Error:', e.message);
+    if (e.response) {
+      console.error('-> Status:', e.response.status);
+      console.error('-> Data:', JSON.stringify(e.response.data, null, 2));
+    }
     return null;
   }
 }
 
 async function parseOzon(url) {
+  const path = new URL(url).pathname;
+  const apiUrl = `https://www.ozon.by/api/composer-api.bx/page/json/v2?url=${path}`;
+
+  // --- ИМИТАЦИЯ МОБИЛЬНОГО ПРИЛОЖЕНИЯ ---
+  const headers = {
+    'User-Agent': 'ozonapp_by/16.18.0 (Android 13; Pixel 7)',
+    'X-O3-App-Name': 'ozonapp_by',
+    'X-O3-App-Version': '16.18.0(100024)',
+    'X-O3-Device-Type': 'mobile',
+    'Accept': 'application/json',
+    'Accept-Language': 'ru-BY',
+  };
+
+  console.log('🔵 Ozon API Fetch:', apiUrl);
+  console.log('🔵 With Headers:', headers);
+
   try {
-    const path = new URL(url).pathname;
-    const apiUrl = `https://www.ozon.by/api/composer-api.bx/page/json/v2?url=${path}`;
+    const proxiedUrl = getProxyUrl(apiUrl);
+    const { data } = await axios.get(proxiedUrl, { headers, timeout: 25000 });
 
-    console.log('🔵 Ozon Fetch (via Proxy with JS Rendering)...');
+    console.log('✅ Ozon API response received!');
 
-    // Включаем JS-рендеринг и увеличиваем таймаут
-    const { data } = await axios.get(getProxyUrl(apiUrl, { render: true }), { timeout: 30000 });
+    const states = data.widgetStates;
+    if (!states) {
+      console.error('❌ Ozon Error: widgetStates is missing in response.');
+      return null;
+    }
 
-    const states = data.widgetStates || {};
     const headingKey = Object.keys(states).find(k => k.includes('webProductHeading'));
     const galleryKey = Object.keys(states).find(k => k.includes('webGallery'));
 
     const title = headingKey ? JSON.parse(states[headingKey]).title : 'Товар Ozon';
     const image = galleryKey ? JSON.parse(states[galleryKey]).coverImage : '';
 
+    console.log(`✅ Parsed from Ozon: ${title}`);
     return { title, image, url };
+
   } catch (e) {
-    console.error('❌ Ozon Error:', e.response ? `Status ${e.response.status}` : e.message);
+    console.error('❌❌❌ OZON FATAL ERROR ❌❌❌');
+    console.error('-> Message:', e.message);
+    if (e.response) {
+      console.error('-> Status:', e.response.status);
+      console.error('-> Headers:', JSON.stringify(e.response.headers, null, 2));
+      console.error('-> Data:', JSON.stringify(e.response.data, null, 2));
+    }
     return null;
   }
 }
@@ -87,7 +110,6 @@ function getTitleFromUrl(url) {
     return slug.replace(/[-_]/g, ' ').replace(/\d+/g, '').trim() || 'Товар';
   } catch (e) { return 'Товар по ссылке'; }
 }
-
 
 async function extractMeta(url, msgObject = null, telegramInstance = null) {
   let result = null;
