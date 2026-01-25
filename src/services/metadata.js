@@ -1,10 +1,9 @@
 const axios = require('axios');
-const config = require('../config');
 
 async function extractMeta(url) {
   console.log('🔍 Requesting Google to parse:', url);
 
-  // 1. Специальный парсер для Wildberries (он и так работает)
+  // 1. Wildberries (оставляем как есть, он работает)
   if (url.includes('wildberries') || url.includes('wb.ru')) {
     try {
       const id = url.match(/catalog\/(\d+)/)?.[1];
@@ -14,27 +13,36 @@ async function extractMeta(url) {
     } catch (e) { }
   }
 
-  // 2. Для всего остального (Ozon, GoldApple и т.д.) используем наш Google Script
+  // 2. Все остальное через Google Apps Script
   const gasUrl = process.env.GAS_PARSER_URL;
   if (gasUrl) {
     try {
-      const { data } = await axios.get(gasUrl, { params: { url: url }, timeout: 15000 });
-      if (data && data.title) {
+      // Очищаем URL от мусора перед отправкой в Google
+      const cleanUrl = url.split('?')[0];
+
+      const { data } = await axios.get(gasUrl, {
+        params: { url: cleanUrl },
+        timeout: 20000
+      });
+
+      if (data && data.title && data.title !== "307 Temporary Redirect") {
         console.log('✅ Parsed via Google:', data.title);
         return {
-          // Чистим заголовок Ozon от лишнего мусора
-          title: data.title.replace(' - купить на OZON', '').replace(' в интернет-магазине Золотое Яблоко', '').trim(),
+          title: data.title,
           image: data.image,
           url: url
         };
+      } else {
+        console.log('⚠️ Google returned empty or redirect. Data:', data);
       }
     } catch (e) {
       console.error('❌ Google Parser Error:', e.message);
     }
   }
 
-  // 3. Совсем крайний случай
-  return { title: 'Товар по ссылке', image: '', url };
+  // 3. Совсем крайний случай (красивое имя из ссылки)
+  const slug = new URL(url).pathname.split('/').filter(Boolean).pop() || 'Товар';
+  return { title: slug.replace(/[-_]/g, ' ').substring(0, 50), image: '', url };
 }
 
 module.exports = { extractMeta };
