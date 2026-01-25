@@ -3,6 +3,8 @@ const google = require('../services/google');
 const meta = require('../services/metadata');
 const config = require('../config');
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 module.exports = {
   async handleTopicMessage(ctx) {
     const msg = ctx.message || ctx.editedMessage;
@@ -17,11 +19,25 @@ module.exports = {
     if (!urlMatch) return;
 
     const url = urlMatch[0];
-    const m = await ctx.reply('🔎 Обработка...');
+    const mStatus = await ctx.reply('⏳ Подготавливаю данные...');
 
     try {
-      // Прямой вызов нового "умного" мета-парсера
-      const data = await meta.extractMeta(url, msg, ctx.telegram);
+      // --- ХАК: ПОЛУЧАЕМ ДАННЫЕ ИЗ ТЕЛЕГРАМА ---
+      await sleep(4000); // Ждем, пока ТГ создаст превью
+
+      // Пересылаем сообщение боту в личку (самому себе), чтобы "обновить" метаданные
+      const forward = await ctx.telegram.forwardMessage(ctx.botInfo.id, ctx.chat.id, msg.message_id);
+
+      // Теперь в объекте forward.web_page ГАРАНТИРОВАННО есть данные, если их видит ТГ
+      const updatedMsg = forward;
+      console.log('📲 Telegram Preview Data:', updatedMsg.web_page ? 'FOUND' : 'NOT FOUND');
+
+      // Вызываем парсер, передавая ему "свежее" сообщение
+      const data = await meta.extractMeta(url, updatedMsg, ctx.telegram);
+
+      // Удаляем техническое сообщение
+      await ctx.telegram.deleteMessage(ctx.botInfo.id, forward.message_id).catch(() => { });
+      // ----------------------------------------
 
       await google.appendRow('Wishlist', [
         new Date().toLocaleString('ru-RU'),
@@ -32,7 +48,7 @@ module.exports = {
         'Active'
       ]);
 
-      await ctx.deleteMessage(m.message_id).catch(() => { });
+      await ctx.deleteMessage(mStatus.message_id).catch(() => { });
 
       const webLink = `${config.APP_URL}/wishlist`;
       const caption = `✨ *Добавлено!*\n🏷 ${data.title}\n\n🌐 [Каталог](${webLink})`;
@@ -49,15 +65,14 @@ module.exports = {
 
     } catch (e) {
       console.error('Wishlist Error:', e);
-      await ctx.deleteMessage(m.message_id).catch(() => { });
-      ctx.reply('❌ Ошибка при сохранении.');
+      await ctx.deleteMessage(mStatus.message_id).catch(() => { });
+      ctx.reply('❌ Не удалось получить данные. Попробуй еще раз.');
     }
   },
 
   async sendInterface(ctx) {
     const webLink = `${config.APP_URL}/wishlist`;
-    const text = `🎁 *Вишлист*\nПросто кидай ссылки на товары.`;
-    await ctx.replyWithMarkdown(text, Markup.inlineKeyboard([
+    await ctx.replyWithMarkdown(`🎁 *Вишлист*\nКидай ссылки сюда.`, Markup.inlineKeyboard([
       [Markup.button.url('🌐 Открыть вишлист', webLink)],
       [Markup.button.callback('🗑 Удалить последнюю', 'wishlist_undo')]
     ]));
