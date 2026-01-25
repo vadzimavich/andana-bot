@@ -1,26 +1,16 @@
 const axios = require('axios');
 const config = require('../config');
-
-// Хелпер для очистки JSON, если прокси вернул его внутри HTML (бывает при render=true)
-function cleanJson(rawData) {
-  if (typeof rawData === 'object') return rawData;
-  try {
-    // Ищем что-то похожее на JSON внутри строки
-    const match = rawData.match(/\{[\s\S]*\}/);
-    return match ? JSON.parse(match[0]) : null;
-  } catch (e) {
-    return null;
-  }
-}
+const cheerio = require('cheerio');
 
 function getProxyUrl(targetUrl, options = {}) {
   if (!config.SCRAPER_API_KEY) return targetUrl;
   const params = new URLSearchParams({
     api_key: config.SCRAPER_API_KEY,
     url: targetUrl,
+    country_code: 'by'
   });
   if (options.premium) params.append('premium', 'true');
-  if (options.render) params.append('render', 'true');
+  // Рендеринг убираем — он слишком медленный и часто вызывает таймауты
   return `http://api.scraperapi.com?${params.toString()}`;
 }
 
@@ -28,17 +18,16 @@ async function parseGoldApple(url) {
   try {
     const slug = url.split('/').pop().split('?')[0];
     const apiUrl = `https://goldapple.by/it_api/v1/catalog/product/by-url?url=${slug}`;
-    console.log('🍏 GoldApple: Fetching with JS Rendering...');
+    console.log('🍏 GoldApple: Fetching API via Premium Proxy...');
 
-    // Включаем render: true, чтобы пройти "checking device"
-    const { data: rawData } = await axios.get(getProxyUrl(apiUrl, { premium: true, render: true }), { timeout: 45000 });
-
-    const data = cleanJson(rawData);
-    if (!data || !data.data) throw new Error('Could not parse GoldApple JSON');
+    const { data } = await axios.get(getProxyUrl(apiUrl, { premium: true }), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1' },
+      timeout: 20000
+    });
 
     const product = data.data;
     return {
-      title: `${product.attributes?.brand || ''} - ${product.name}`,
+      title: `${product.attributes?.brand || ''} ${product.name}`.trim(),
       image: product.image_url || product.media?.[0]?.url,
       url: url
     };
@@ -50,28 +39,36 @@ async function parseGoldApple(url) {
 
 async function parseOzon(url) {
   try {
-    const path = new URL(url).pathname;
-    const apiUrl = `https://www.ozon.by/api/composer-api.bx/page/json/v2?url=${path}`;
-    console.log('🔵 Ozon: Fetching with JS Rendering...');
+    console.log('🔵 Ozon: Fetching HTML via Premium Proxy...');
+    // Запрашиваем основную страницу, а не API
+    const { data: html } = await axios.get(getProxyUrl(url, { premium: true }), {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36' },
+      timeout: 25000
+    });
 
-    // render: true поможет пройти редиректы и подгрузить данные
-    const { data: rawData } = await axios.get(getProxyUrl(apiUrl, { premium: true, render: true }), { timeout: 45000 });
+    const $ = cheerio.load(html);
 
-    const data = cleanJson(rawData);
-    if (!data || !data.widgetStates) {
-      // Если API не отдало widgetStates, попробуем вытащить из SEO (план Б)
-      if (data?.seo?.title) return { title: data.seo.title, image: '', url };
-      throw new Error('Ozon JSON structure unknown');
+    // Ищем разметку JSON-LD (она есть на всех страницах товаров Ozon)
+    const ldJsonText = $('script[type="application/ld+json"]').html();
+    if (ldJsonText) {
+      const ldData = JSON.parse(ldJsonText);
+      console.log('✅ Ozon: Found LD+JSON data');
+      return {
+        title: ldData.name,
+        image: ldData.image,
+        url: url
+      };
     }
 
-    const states = data.widgetStates;
-    const headingKey = Object.keys(states).find(k => k.includes('webProductHeading'));
-    const galleryKey = Object.keys(states).find(k => k.includes('webGallery'));
+    // Если LD+JSON нет, пробуем обычные мета-теги
+    const title = $('meta[property="og:title"]').attr('content') || $('title').text();
+    const image = $('meta[property="og:image"]').attr('content');
 
-    const title = headingKey ? JSON.parse(states[headingKey]).title : 'Товар Ozon';
-    const image = galleryKey ? JSON.parse(states[galleryKey]).coverImage : '';
-
-    return { title, image, url };
+    return {
+      title: title.replace(' - купить на OZON', '').trim(),
+      image,
+      url
+    };
   } catch (e) {
     console.error('❌ Ozon Error:', e.message);
     return null;
@@ -82,7 +79,6 @@ async function parseWildberries(url) {
   try {
     const id = url.match(/catalog\/(\d+)/)?.[1];
     if (!id) return null;
-    // WB обычно не требует прокси для своего API
     const { data } = await axios.get(`https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`, { timeout: 10000 });
     const product = data.data.products[0];
     return {
@@ -107,9 +103,9 @@ async function extractMeta(url, msgObject = null, telegramInstance = null) {
   else if (url.includes('ozon')) result = await parseOzon(url);
   else if (url.includes('wildberries') || url.includes('wb.ru')) result = await parseWildberries(url);
 
-  if (result && result.title) return result;
+  if (result && result.title && !result.title.includes('checking device')) return result;
 
-  // Fallback на Telegram Preview
+  // Если наши парсеры не справились — берем то, что видит Телеграм
   if (msgObject?.web_page) {
     const wp = msgObject.web_page;
     let img = '';
@@ -120,10 +116,10 @@ async function extractMeta(url, msgObject = null, telegramInstance = null) {
         img = link.href;
       } catch (e) { }
     }
-    return { title: wp.title || getTitleFromUrl(url), image: img, url };
+    return { title: wp.title || getTitleFromUrl(url), image: img || result?.image, url };
   }
 
-  return { title: getTitleFromUrl(url), image: '', url };
+  return { title: getTitleFromUrl(url), image: result?.image || '', url };
 }
 
 module.exports = { extractMeta };
