@@ -1,18 +1,25 @@
 const axios = require('axios');
 const config = require('../config');
 
+// Хелпер для прокси. Теперь он умеет всё.
 function getProxyUrl(targetUrl, options = {}) {
   if (!config.SCRAPER_API_KEY) {
     console.log('⚠️ ScraperAPI key not found, using direct request.');
     return targetUrl;
   }
+
   const params = new URLSearchParams({
     api_key: config.SCRAPER_API_KEY,
     url: targetUrl,
   });
+
   if (options.premium) {
     params.append('premium', 'true');
   }
+  if (options.render) {
+    params.append('render', 'true');
+  }
+
   return `http://api.scraperapi.com?${params.toString()}`;
 }
 
@@ -20,22 +27,22 @@ async function parseGoldApple(url) {
   try {
     const slug = url.split('/').pop().split('?')[0];
     const apiUrl = `https://goldapple.by/it_api/v1/catalog/product/by-url?url=${slug}`;
-    console.log('🍏 GoldApple Fetch (via Premium Proxy)...');
 
-    const { data } = await axios.get(getProxyUrl(apiUrl, { premium: true }), { timeout: 25000 });
+    console.log('🍏 GoldApple Fetch (Premium + Render)...');
 
-    // --- ДИАГНОСТИКА ---
-    console.log('🍏 GOLDAPPLE RAW RESPONSE:', JSON.stringify(data, null, 2));
-    // --------------------
+    // Запускаем браузер на стороне прокси
+    const { data } = await axios.get(getProxyUrl(apiUrl, { premium: true, render: true }), { timeout: 45000 });
 
-    const product = data.data; // Эта строка скорее всего вызовет ошибку, но лог выше уже будет в консоли
+    console.log('🍏 GoldApple RAW RESPONSE:', JSON.stringify(data, null, 2));
+
+    const product = data.data;
     return {
       title: `${product.attributes.brand} - ${product.name}`,
       image: product.image_url || product.media?.[0]?.url,
       url: url
     };
   } catch (e) {
-    console.error('❌ GoldApple Parse Error:', e.message);
+    console.error('❌ GoldApple Error:', e.message);
     return null;
   }
 }
@@ -43,25 +50,21 @@ async function parseGoldApple(url) {
 async function parseOzon(url) {
   const path = new URL(url).pathname;
   const apiUrl = `https://www.ozon.by/api/composer-api.bx/page/json/v2?url=${path}`;
-  const headers = {
-    'User-Agent': 'ozonapp_by/16.18.0 (Android 13; Pixel 7)',
-    'X-O3-App-Name': 'ozonapp_by',
-    'X-O3-App-Version': '16.18.0(100024)',
-  };
 
-  console.log('🔵 Ozon API Fetch (via Premium Proxy)...');
+  const headers = { 'User-Agent': 'ozonapp_by/16.18.0 (Android 13; Pixel 7)' };
+
+  console.log('🔵 Ozon API Fetch (Premium + Render)...');
 
   try {
-    const proxiedUrl = getProxyUrl(apiUrl, { premium: true });
-    const { data } = await axios.get(proxiedUrl, { headers, timeout: 25000 });
+    // Запускаем браузер на стороне прокси
+    const proxiedUrl = getProxyUrl(apiUrl, { premium: true, render: true });
+    const { data } = await axios.get(proxiedUrl, { headers, timeout: 45000 });
 
-    // --- ДИАГНОСТИКА ---
     console.log('🔵 OZON RAW RESPONSE:', JSON.stringify(data, null, 2));
-    // --------------------
 
     const states = data.widgetStates;
     if (!states) {
-      console.error('❌ Ozon Error: widgetStates is missing. See RAW response above.');
+      console.error('❌ Ozon Error: widgetStates is missing in the rendered response.');
       return null;
     }
 
@@ -74,12 +77,12 @@ async function parseOzon(url) {
     return { title, image, url };
 
   } catch (e) {
-    console.error('❌ Ozon Parse Error:', e.message);
+    console.error('❌ Ozon Error:', e.message);
     return null;
   }
 }
 
-// ... (остальные функции без изменений) ...
+// ... (Wildberries и остальные функции без изменений) ...
 async function parseWildberries(url) {
   try {
     const id = url.match(/catalog\/(\d+)/)?.[1];
