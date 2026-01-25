@@ -23,7 +23,7 @@ function getWbHost(vol) {
   if (vol >= 2838 && vol <= 3053) return '18';
   if (vol >= 3054 && vol <= 3269) return '19';
   if (vol >= 3270 && vol <= 3485) return '20';
-  return '21'; // Новые сервера
+  return '21';
 }
 
 async function parseWildberries(url) {
@@ -32,77 +32,131 @@ async function parseWildberries(url) {
     if (!match) return null;
     const id = parseInt(match[1]);
 
-    // 1. Вычисляем картинку (работает всегда, даже без API)
+    // 1. Картинка (Математика)
     const vol = Math.floor(id / 100000);
     const part = Math.floor(id / 1000);
     const host = getWbHost(vol);
     const imageUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/images/big/1.webp`;
 
-    // 2. Пробуем API (но если упадет - не страшно, картинка уже есть)
-    let title = `Товар WB (Арт: ${id})`;
-    try {
-      const apiUrl = `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`;
-      const { data } = await axios.get(apiUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-        timeout: 3000
-      });
-      if (data?.data?.products?.[0]) {
-        title = data.data.products[0].name;
-      }
-    } catch (e) {
-      console.log('WB API Failed, using ID as title');
+    // 2. Название (Пробуем разные API)
+    let title = null;
+    const endpoints = [
+      `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`,
+      `https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`,
+      `https://wbx-content-v2.wbstatic.net/ru/${id}.json` // Статический JSON (самый надежный)
+    ];
+
+    for (const api of endpoints) {
+      try {
+        const { data } = await axios.get(api, { timeout: 2000 });
+        if (data?.data?.products?.[0]?.name) {
+          title = data.data.products[0].name;
+          break;
+        }
+        if (data?.subj_name || data?.imt_name) { // Для static JSON
+          title = data.imt_name || data.subj_name;
+          break;
+        }
+      } catch (e) { }
     }
 
-    return { title, image: imageUrl, url };
+    return {
+      title: title || `Товар WB (Арт: ${id})`,
+      image: imageUrl,
+      url
+    };
   } catch (e) {
     return null;
   }
 }
 
-// Попытка вытащить название из URL (для Ozon/GoldApple)
+// --- ПАРСИНГ ИЗ TELEGRAM PREVIEW ---
+async function extractFromTelegram(ctx) {
+  const webPage = ctx.message.web_page;
+  if (!webPage) return null;
+
+  console.log('📲 Using Telegram WebPage Preview');
+
+  let imageUrl = null;
+  // Если у превью есть фото, получаем его URL
+  if (webPage.photo) {
+    try {
+      // Берем самый большой размер
+      const fileId = webPage.photo[webPage.photo.length - 1].file_id;
+      const link = await ctx.telegram.getFileLink(fileId);
+      imageUrl = link.href;
+    } catch (e) {
+      console.error('TG Photo Error:', e.message);
+    }
+  }
+
+  return {
+    title: webPage.title || webPage.site_name || 'Товар',
+    image: imageUrl, // Может быть null, тогда подставится заглушка позже
+    url: webPage.url
+  };
+}
+
+// --- FALLBACK ИЗ URL ---
 function getTitleFromUrl(url) {
   try {
     const urlObj = new URL(url);
     const path = urlObj.pathname;
-    // Берем последнюю часть пути
     const parts = path.split('/').filter(p => p);
-    let slug = parts[parts.length - 1] || parts[parts.length - 2];
+    // Берем последний сегмент, если он длинный, иначе предпоследний
+    let slug = parts[parts.length - 1];
+    if (!slug || slug.length < 4) slug = parts[parts.length - 2];
 
-    // Убираем ID и мусор
-    slug = slug.replace(/\d+/g, '').replace(/-/g, ' ').replace(/_/g, ' ').trim();
+    if (!slug) return 'Товар по ссылке';
 
-    if (slug.length > 3) return slug.charAt(0).toUpperCase() + slug.slice(1);
-    return 'Товар по ссылке';
+    // Убираем ID, расширения и мусор
+    slug = slug.split('.')[0] // убрать .html
+      .replace(/\d{5,}/g, '') // убрать длинные цифры
+      .replace(/[-_]/g, ' ') // заменить дефисы на пробелы
+      .trim();
+
+    // Делаем первую букву заглавной
+    return slug.charAt(0).toUpperCase() + slug.slice(1);
   } catch (e) {
     return 'Ссылка';
   }
 }
 
-async function extractMeta(url) {
+// --- ГЛАВНАЯ ФУНКЦИЯ ---
+async function extractMeta(url, ctx) {
   console.log('📥 Parsing:', url);
 
-  // 1. WILDBERRIES
+  // 1. ПРИОРИТЕТ: Данные от Telegram (если есть превью)
+  // Это спасет Ozon и GoldApple
+  if (ctx && ctx.message && ctx.message.web_page) {
+    const tgData = await extractFromTelegram(ctx);
+    if (tgData && tgData.title) {
+      return {
+        title: tgData.title,
+        image: tgData.image || 'https://via.placeholder.com/400x400?text=No+Image',
+        url: url
+      };
+    }
+  }
+
+  // 2. WILDBERRIES (Спец. парсер)
   if (url.includes('wildberries') || url.includes('wb.ru')) {
     const wbData = await parseWildberries(url);
     if (wbData) return wbData;
   }
 
-  // 2. ОСТАЛЬНЫЕ (OGS)
+  // 3. OGS (Для AliExpress, Lamoda и остальных)
   try {
     const options = {
       url: url,
-      timeout: 8000, // Меньше таймаут, чтобы быстрее падать на фолбек
-      fetchOptions: {
-        headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' }
-      }
+      timeout: 10000,
+      fetchOptions: { headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' } }
     };
     const { result } = await ogs(options);
 
-    // Проверка на "плохие" заголовки (защита от ботов)
     let title = result.ogTitle || result.twitterTitle;
-    if (title && (title.includes('checking') || title.includes('Access Denied') || title.includes('Just a moment'))) {
-      throw new Error('Bot protection detected');
-    }
+    // Проверка на защиту
+    if (title && (title.includes('checking') || title.includes('Access Denied'))) throw new Error('Bot protection');
 
     return {
       title: title || getTitleFromUrl(url),
@@ -112,7 +166,7 @@ async function extractMeta(url) {
 
   } catch (e) {
     console.error('❌ Meta Error:', e.message);
-    // 3. FALLBACK (Если всё упало - берем название из URL)
+    // 4. ПОЛНЫЙ FALLBACK
     return {
       title: getTitleFromUrl(url),
       image: 'https://via.placeholder.com/150?text=Link',

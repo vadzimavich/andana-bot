@@ -19,24 +19,23 @@ module.exports = {
       const url = urlMatch[0];
 
       try {
-        // Вызываем наш новый парсер
-        const data = await meta.extractMeta(url);
-
-        console.log('📝 Saving to Sheets:', data.title);
+        // ВАЖНО: Передаем ctx вторым аргументом!
+        const data = await meta.extractMeta(url, ctx);
 
         await google.appendRow('Wishlist', [
           new Date().toLocaleString('ru-RU'),
           ctx.userConfig.name,
-          data.title,
+          data.title || 'Товар',
           data.url,
-          data.image,
+          data.image || '',
           'Active'
         ]);
 
         await ctx.deleteMessage(m.message_id).catch(() => { });
 
         const webLink = `${config.APP_URL}/wishlist`;
-        // Отправляем превью с картинкой (если она есть)
+
+        // Если есть картинка - шлем с картинкой
         if (data.image && !data.image.includes('placeholder')) {
           await ctx.replyWithPhoto(data.image, {
             caption: `✨ *Добавлено!*\n🏷 ${data.title}\n\n🌐 [Вишлист](${webLink})`,
@@ -47,16 +46,14 @@ module.exports = {
         }
 
       } catch (e) {
-        console.error('Wishlist Controller Error:', e);
+        console.error('Wishlist Error:', e);
         await ctx.deleteMessage(m.message_id).catch(() => { });
-        ctx.reply('❌ Ошибка при добавлении. Ссылка сохранена как есть.');
-        // Аварийное сохранение
-        await google.appendRow('Wishlist', [new Date().toLocaleString('ru-RU'), ctx.userConfig.name, 'Ссылка', url, '', 'Active']);
+        ctx.reply('❌ Не удалось добавить товар.');
       }
     }
   },
 
-  // ... (sendInterface, undo остаются)
+  // ... (остальные методы без изменений)
   async sendInterface(ctx) {
     const webLink = `${config.APP_URL}/wishlist`;
     const text = `🎁 *Тема: Вишлисты*\nКидай сюда ссылки.\n\n🌐 [Открыть каталог](${webLink})`;
