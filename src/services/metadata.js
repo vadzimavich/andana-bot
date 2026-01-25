@@ -4,49 +4,85 @@ const cheerio = require('cheerio');
 
 const TELEGRAM_UA = 'TelegramBot (like TwitterBot)';
 
+// Retry с задержкой
+async function retryRequest(fn, retries = 3, delay = 1000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
+    }
+  }
+}
+
 const parsers = {
   wildberries: async (url) => {
     try {
-      // Извлекаем артикул из URL
       const articleMatch = url.match(/catalog\/(\d+)/);
-      if (!articleMatch) {
-        console.log('WB: Артикул не найден');
-        return null;
-      }
+      if (!articleMatch) return null;
 
       const article = articleMatch[1];
       console.log('WB: Артикул', article);
 
-      // Используем публичный поисковый API WB
-      const searchUrl = `https://search.wb.ru/exactmatch/ru/common/v4/search?appType=1&couponsGeo=12,3,18,15,21&curr=rub&dest=-1257786&emp=0&lang=ru&locale=ru&pricemarginCoeff=1.0&query=${article}&reg=0&regions=80,64,83,4,38,33,70,82,69,68,86,75,30,40,48,1,22,66,31,71&resultset=catalog&sort=popular&spp=27&suppressSpellcheck=false`;
+      // Пробуем несколько API эндпоинтов
+      const endpoints = [
+        `https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${article}`,
+        `https://card.wb.ru/cards/detail?appType=1&curr=rub&dest=-1257786&nm=${article}`,
+        `https://wbx-content-v2.wbstatic.net/price/${article}.json`
+      ];
 
-      const { data } = await axios.get(searchUrl, {
+      for (const apiUrl of endpoints) {
+        try {
+          const { data } = await retryRequest(() => axios.get(apiUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0',
+              'Accept': '*/*'
+            },
+            timeout: 8000
+          }));
+
+          const product = data?.data?.products?.[0] || data;
+
+          if (product?.name || product?.title) {
+            const vol = Math.floor(product.id / 100000);
+            const part = Math.floor(product.id / 1000);
+            const imageUrl = `https://basket-${vol.toString().padStart(2, '0')}.wbbasket.ru/vol${vol}/part${part}/${product.id}/images/big/1.webp`;
+
+            return {
+              title: (product.name || product.title).substring(0, 150),
+              image: imageUrl,
+              url: url
+            };
+          }
+        } catch (e) {
+          console.log('WB API failed:', apiUrl.split('/')[3], e.response?.status || e.message);
+          continue;
+        }
+      }
+
+      // Последняя попытка - парсим HTML напрямую
+      console.log('WB: Trying HTML parsing');
+      const { data } = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': '*/*',
-          'Origin': 'https://www.wildberries.ru'
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
         },
         timeout: 10000
       });
 
-      console.log('WB Search API:', data?.data?.products?.length || 0, 'products found');
+      const $ = cheerio.load(data);
+      const title = $('h1').first().text().trim() || $('meta[property="og:title"]').attr('content');
+      const image = $('meta[property="og:image"]').attr('content');
 
-      if (data?.data?.products?.[0]) {
-        const product = data.data.products[0];
-
-        // Формируем URL картинки по новой схеме
-        const vol = Math.floor(product.id / 100000);
-        const part = Math.floor(product.id / 1000);
-        const imageUrl = `https://basket-${vol.toString().padStart(2, '0')}.wbbasket.ru/vol${vol}/part${part}/${product.id}/images/big/1.webp`;
-
+      if (title) {
         return {
-          title: product.name,
-          image: imageUrl,
+          title: title.substring(0, 150),
+          image: image || 'https://via.placeholder.com/400',
           url: url
         };
       }
     } catch (e) {
-      console.error('WB API Error:', e.response?.status || e.message);
+      console.error('WB Error:', e.response?.status || e.message);
     }
     return null;
   },
@@ -55,93 +91,60 @@ const parsers = {
     try {
       console.log('Ozon: Parsing', url);
 
-      // Разворачиваем короткую ссылку вручную
+      // Если короткая ссылка - пробуем развернуть
       let finalUrl = url;
-
       if (url.includes('/t/')) {
         try {
-          // Делаем HEAD запрос без следования редиректам
-          const response = await axios.head(url, {
+          const response = await axios.get(url, {
             maxRedirects: 0,
             validateStatus: () => true,
-            timeout: 5000
+            timeout: 3000
           });
 
-          if (response.headers.location) {
-            finalUrl = response.headers.location;
-            // Если редирект относительный, добавляем домен
-            if (finalUrl.startsWith('/')) {
-              finalUrl = 'https://ozon.by' + finalUrl;
-            }
-            console.log('Ozon: Redirect to', finalUrl);
+          const location = response.headers.location;
+          if (location && !location.includes('?__rr=')) {
+            finalUrl = location.startsWith('http') ? location : 'https://ozon.by' + location;
+            console.log('Ozon: Redirected to', finalUrl);
           }
         } catch (e) {
-          if (e.response?.headers?.location) {
-            finalUrl = e.response.headers.location;
-            if (finalUrl.startsWith('/')) {
-              finalUrl = 'https://ozon.by' + finalUrl;
-            }
-          }
+          // Игнорируем ошибки редиректа
         }
       }
 
-      // Парсим финальную страницу
-      const { data } = await axios.get(finalUrl, {
+      // Парсим с увеличенным таймаутом и retry
+      const { data } = await retryRequest(() => axios.get(finalUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html',
           'Accept-Language': 'ru-RU,ru;q=0.9',
-          'Referer': 'https://ozon.by/',
-          'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"Windows"',
-          'sec-fetch-dest': 'document',
-          'sec-fetch-mode': 'navigate',
-          'sec-fetch-site': 'same-origin'
+          'Cache-Control': 'no-cache'
         },
-        timeout: 15000
-      });
+        timeout: 25000 // Увеличенный таймаут
+      }), 2, 2000);
 
       const $ = cheerio.load(data);
 
-      // Ищем данные в разных местах
       let title = null;
       let imageUrl = null;
 
-      // 1. __NEXT_DATA__ (React SSR)
-      const nextDataScript = $('script#__NEXT_DATA__').html();
-      if (nextDataScript) {
+      // Ищем везде
+      title = $('h1').first().text().trim() ||
+        $('meta[property="og:title"]').attr('content') ||
+        $('title').text().split('—')[0].trim();
+
+      imageUrl = $('meta[property="og:image"]').attr('content') ||
+        $('img[class*="detail"]').first().attr('src');
+
+      // JSON-LD
+      $('script[type="application/ld+json"]').each((i, elem) => {
         try {
-          const nextData = JSON.parse(nextDataScript);
-          const pageProps = nextData?.props?.pageProps;
-
-          if (pageProps?.title) {
-            title = pageProps.title;
+          const json = JSON.parse($(elem).html());
+          if (json['@type'] === 'Product') {
+            if (!title) title = json.name;
+            if (!imageUrl) imageUrl = Array.isArray(json.image) ? json.image[0] : json.image;
           }
-          if (pageProps?.image) {
-            imageUrl = pageProps.image;
-          }
-        } catch (e) {
-          console.log('Ozon: Failed to parse __NEXT_DATA__');
-        }
-      }
-
-      // 2. JSON-LD fallback
-      if (!title || !imageUrl) {
-        $('script[type="application/ld+json"]').each((i, elem) => {
-          try {
-            const json = JSON.parse($(elem).html());
-            if (json['@type'] === 'Product') {
-              if (!title) title = json.name;
-              if (!imageUrl) imageUrl = Array.isArray(json.image) ? json.image[0] : json.image;
-            }
-          } catch (e) { }
-        });
-      }
-
-      // 3. Meta tags fallback
-      if (!title) title = $('meta[property="og:title"]').attr('content') || $('h1').first().text().trim();
-      if (!imageUrl) imageUrl = $('meta[property="og:image"]').attr('content');
+        } catch (e) { }
+      });
 
       console.log('Ozon: Title:', title);
       console.log('Ozon: Image:', imageUrl);
@@ -172,7 +175,7 @@ async function extractMeta(url) {
         console.log('✅ WB Success');
         return wbData;
       }
-      console.log('⚠️ WB failed');
+      console.log('⚠️ WB failed completely');
     }
 
     // Ozon
@@ -183,14 +186,14 @@ async function extractMeta(url) {
         console.log('✅ Ozon Success');
         return ozonData;
       }
-      console.log('⚠️ Ozon failed');
+      console.log('⚠️ Ozon failed completely');
     }
 
-    // Универсальный парсер (AliExpress и др.)
+    // Универсальный парсер
     console.log('🔄 Using Open Graph Scraper');
     const options = {
       url: url,
-      timeout: 15000,
+      timeout: 20000,
       fetchOptions: {
         headers: {
           'User-Agent': TELEGRAM_UA,
@@ -226,11 +229,7 @@ async function extractMeta(url) {
 
   } catch (e) {
     console.error('❌ Error:', e.message);
-    return {
-      title: 'Товар (не удалось получить данные)',
-      image: 'https://via.placeholder.com/400x400/ffcccc/cc0000?text=Ошибка',
-      url: url
-    };
+    throw new Error('Не удалось распарсить ссылку');
   }
 }
 
