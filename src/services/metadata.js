@@ -1,11 +1,5 @@
 const ogs = require('open-graph-scraper');
 const axios = require('axios');
-const cheerio = require('cheerio');
-
-// Стандартный UA для обычных сайтов (Telegram бот)
-const TELEGRAM_UA = 'TelegramBot (like TwitterBot)';
-// UA реального браузера для капризных сайтов
-const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 // --- ХЕЛПЕРЫ ДЛЯ WILDBERRIES ---
 function getWbHost(vol) {
@@ -26,7 +20,10 @@ function getWbHost(vol) {
   if (vol >= 2190 && vol <= 2405) return '15';
   if (vol >= 2406 && vol <= 2621) return '16';
   if (vol >= 2622 && vol <= 2837) return '17';
-  return '18'; // Fallback, может меняться
+  if (vol >= 2838 && vol <= 3053) return '18';
+  if (vol >= 3054 && vol <= 3269) return '19';
+  if (vol >= 3270 && vol <= 3485) return '20';
+  return '21'; // Новые сервера
 }
 
 async function parseWildberries(url) {
@@ -35,82 +32,90 @@ async function parseWildberries(url) {
     if (!match) return null;
     const id = parseInt(match[1]);
 
-    // 1. Вычисляем URL картинки математически (это работает всегда)
+    // 1. Вычисляем картинку (работает всегда, даже без API)
     const vol = Math.floor(id / 100000);
     const part = Math.floor(id / 1000);
     const host = getWbHost(vol);
     const imageUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/images/big/1.webp`;
 
-    // 2. Пытаемся получить название через API v2
-    const apiUrl = `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`;
-    const { data } = await axios.get(apiUrl, { headers: { 'User-Agent': BROWSER_UA } });
-
-    const product = data?.data?.products?.[0];
-    const title = product ? product.name : 'Товар Wildberries';
+    // 2. Пробуем API (но если упадет - не страшно, картинка уже есть)
+    let title = `Товар WB (Арт: ${id})`;
+    try {
+      const apiUrl = `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`;
+      const { data } = await axios.get(apiUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+        timeout: 3000
+      });
+      if (data?.data?.products?.[0]) {
+        title = data.data.products[0].name;
+      }
+    } catch (e) {
+      console.log('WB API Failed, using ID as title');
+    }
 
     return { title, image: imageUrl, url };
   } catch (e) {
-    console.error('WB Parse Error:', e.message);
     return null;
   }
 }
 
-// --- ОБЩИЙ ПАРСЕР ---
-async function extractMeta(url) {
+// Попытка вытащить название из URL (для Ozon/GoldApple)
+function getTitleFromUrl(url) {
   try {
-    console.log('📥 Parsing:', url);
+    const urlObj = new URL(url);
+    const path = urlObj.pathname;
+    // Берем последнюю часть пути
+    const parts = path.split('/').filter(p => p);
+    let slug = parts[parts.length - 1] || parts[parts.length - 2];
 
-    // 1. WILDBERRIES (Спец. обработка)
-    if (url.includes('wildberries') || url.includes('wb.ru')) {
-      const wbData = await parseWildberries(url);
-      if (wbData) return wbData;
-    }
+    // Убираем ID и мусор
+    slug = slug.replace(/\d+/g, '').replace(/-/g, ' ').replace(/_/g, ' ').trim();
 
-    // 2. ОСТАЛЬНЫЕ (OGS)
-    // Для Ozon и GoldApple пробуем притвориться браузером, а не ботом
-    const isTricky = url.includes('ozon') || url.includes('goldapple');
-    const userAgent = isTricky ? BROWSER_UA : TELEGRAM_UA;
+    if (slug.length > 3) return slug.charAt(0).toUpperCase() + slug.slice(1);
+    return 'Товар по ссылке';
+  } catch (e) {
+    return 'Ссылка';
+  }
+}
 
+async function extractMeta(url) {
+  console.log('📥 Parsing:', url);
+
+  // 1. WILDBERRIES
+  if (url.includes('wildberries') || url.includes('wb.ru')) {
+    const wbData = await parseWildberries(url);
+    if (wbData) return wbData;
+  }
+
+  // 2. ОСТАЛЬНЫЕ (OGS)
+  try {
     const options = {
       url: url,
-      timeout: 15000,
-      fetchOptions: { headers: { 'User-Agent': userAgent } }
+      timeout: 8000, // Меньше таймаут, чтобы быстрее падать на фолбек
+      fetchOptions: {
+        headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' }
+      }
     };
-
     const { result } = await ogs(options);
 
-    let title = result.ogTitle || result.twitterTitle || result.title;
-    let image = result.ogImage?.[0]?.url || result.ogImage?.url;
-
-    // Фикс для Золотого Яблока (проверка на капчу)
-    if (title && (title.includes('checking device') || title.includes('Just a moment'))) {
-      // Если попали на капчу, пробуем вытащить название из URL (обычно оно там есть транслитом)
-      // Или просто возвращаем заглушку
-      return {
-        title: 'Товар Gold Apple (защита от ботов)',
-        image: 'https://via.placeholder.com/150?text=GoldApple',
-        url: url
-      };
-    }
-
-    // Очистка названия
-    if (title) {
-      title = title.replace(/Купить | в интернет-магазине .*| на маркетплейсе .*/gi, '').trim();
+    // Проверка на "плохие" заголовки (защита от ботов)
+    let title = result.ogTitle || result.twitterTitle;
+    if (title && (title.includes('checking') || title.includes('Access Denied') || title.includes('Just a moment'))) {
+      throw new Error('Bot protection detected');
     }
 
     return {
-      title: title || 'Ссылка',
-      image: image || 'https://via.placeholder.com/150?text=No+Image',
+      title: title || getTitleFromUrl(url),
+      image: result.ogImage?.[0]?.url || result.ogImage?.url || 'https://via.placeholder.com/150?text=No+Image',
       url: url
     };
 
   } catch (e) {
-    // Логируем ошибку, но не крашим бота
-    console.error('❌ Meta Error:', e.result?.error || e.message);
-
+    console.error('❌ Meta Error:', e.message);
+    // 3. FALLBACK (Если всё упало - берем название из URL)
     return {
-      title: 'Ссылка (не удалось получить данные)',
-      image: 'https://via.placeholder.com/150?text=Error',
+      title: getTitleFromUrl(url),
+      image: 'https://via.placeholder.com/150?text=Link',
       url: url
     };
   }

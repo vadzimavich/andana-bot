@@ -44,7 +44,7 @@ async function parseReceipt(imageUrl) {
 
     const prompt = `
             Analyze receipt.
-            Return JSON: {"total": number, "items": [{"category": "Еда|Дом|Транспорт|Здоровье|Одежда|Уход|Развлечения|Алкоголь|Платежи|Разное", "sum": number, "desc": "string"}]}
+            Return JSON: {"total": number, "items": [{"category": "Еда|Дом|Транспорт|Здоровье|Одежда|Уход и красота|Развлечения|Алкоголь|Платежи|Разное", "sum": number, "desc": "string"}]}
         `;
 
     const text = await tryGenerate(prompt, { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } });
@@ -67,7 +67,7 @@ async function categorizeText(text) {
   // Если не угадали - идем к AI
   if (!genAI) return null;
 
-  const prompt = `Categorize expense: "${text}". Categories: Еда, Дом, Транспорт, Здоровье, Одежда, Уход, Развлечения, Алкоголь, Платежи, Разное. JSON: {"category": "Name"}`;
+  const prompt = `Categorize expense: "${text}". Categories: Еда, Дом, Транспорт, Здоровье, Одежда, Уход и красота, Развлечения, Алкоголь, Платежи, Разное. JSON: {"category": "Name"}`;
 
   const textResp = await tryGenerate(prompt);
   if (!textResp) return { category: 'Разное' }; // Fallback

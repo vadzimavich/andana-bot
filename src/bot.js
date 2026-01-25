@@ -195,6 +195,7 @@ bot.action(/^shop_buy_(\d+)$/, Shopping.actionBuy);
 
 bot.action(/^cat_(.+)/, Finance.actionCategory);
 bot.command('models', Finance.debugModels);
+bot.command('analyze', Finance.forceAnalyze);
 
 bot.command('menu', async (ctx) => {
   // Если это личка - шлем главное меню
@@ -230,6 +231,8 @@ bot.action('undo_task', (ctx) => handleUndo(ctx, 'Inbox', 'Задачах'));
 bot.action('wishlist_undo', Wishlist.undo);
 
 bot.action(/^tv_/, Control.handleAction);
+
+
 
 // --- TEXT ---
 bot.on('text', async (ctx) => {

@@ -43,7 +43,7 @@ module.exports = {
         [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
         [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
         [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('👗 Одежда', 'cat_Одежда')],
-        [Markup.button.callback('💅 Уход и красота', 'cat_Уход'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
+        [Markup.button.callback('💅 Уход и красота', 'cat_Уход и красота'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
         [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
       ]));
       state.addMsgToDelete(ctx.from.id, m.message_id);
@@ -220,7 +220,7 @@ module.exports = {
         [Markup.button.callback('🍔 Еда', 'cat_Еда'), Markup.button.callback('🏠 Дом', 'cat_Дом')],
         [Markup.button.callback('🚌 Транспорт', 'cat_Транспорт'), Markup.button.callback('💊 Здоровье', 'cat_Здоровье')],
         [Markup.button.callback('🎉 Развлечения', 'cat_Развлечения'), Markup.button.callback('👗 Одежда', 'cat_Одежда')],
-        [Markup.button.callback('💅 Уход', 'cat_Уход'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
+        [Markup.button.callback('💅 Уход и красота', 'cat_Уход и красота'), Markup.button.callback('💳 Платежи', 'cat_Платежи')],
         [Markup.button.callback('🍺 Алкоголь', 'cat_Алкоголь'), Markup.button.callback('📦 Другое', 'cat_Разное')]
       ]));
     }
@@ -287,5 +287,41 @@ module.exports = {
     ]);
 
     await ctx.replyWithMarkdown(text, keyboard);
+  },
+
+  async forceAnalyze(ctx) {
+    const m = await ctx.reply('🤔 Анализирую траты за неделю...');
+
+    try {
+      const rows = await google.getSheetData('Finances', 'A:D');
+      const now = new Date();
+      const weekAgo = new Date();
+      weekAgo.setDate(now.getDate() - 7);
+
+      let total = 0;
+      let summary = "";
+      const cats = {};
+
+      rows.forEach(r => {
+        if (!r[0] || r[0] === 'Date') return;
+        const [d, m, y] = r[0].split(',')[0].split('.').map(Number);
+        const date = new Date(y, m - 1, d);
+
+        if (date >= weekAgo) {
+          const amount = parseFloat(r[3].replace(',', '.'));
+          cats[r[2]] = (cats[r[2]] || 0) + amount;
+          total += amount;
+        }
+      });
+
+      for (const [c, s] of Object.entries(cats)) summary += `${c}: ${s} BYN\n`;
+
+      const aiComment = await ai.analyzeFinances(summary);
+
+      await ctx.deleteMessage(m.message_id);
+      ctx.reply(`📅 *Тест аналитика (7 дней)*\n${summary}\n💰 Всего: ${total.toFixed(2)} BYN\n\n😈 *Мнение:* ${aiComment}`, { parse_mode: 'Markdown' });
+    } catch (e) {
+      ctx.reply('Ошибка: ' + e.message);
+    }
   },
 };
