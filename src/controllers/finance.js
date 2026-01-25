@@ -171,7 +171,12 @@ module.exports = {
           return this.saveParsedReceipt(ctx, result, result.source);
         } else if (result && !result.success) {
           await ctx.deleteMessage(m.message_id).catch(() => { });
-          return ctx.reply(`❌ Не удалось загрузить чек (${result.source || 'Unknown'}).\nСсылка: ${result.url}`);
+
+          let msg = `❌ Не удалось загрузить чек.`;
+          if (result.error === 'IP Blocked by Euroopt') {
+            msg += `\nСервер бота заблокирован Еврооптом (защита от облаков). Введите сумму вручную.`;
+          }
+          return ctx.reply(msg);
         }
       }
 

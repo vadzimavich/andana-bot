@@ -37,6 +37,7 @@ async function parseEplus(url) {
     console.log('🚀 Запрос к Евроопту, GUID:', guid);
 
     const response = await axios.post('https://rest.eurotorg.by/10101/Json', {
+      // ... (тело запроса то же)
       "CRC": "",
       "Packet": {
         "JWT": "",
@@ -46,16 +47,11 @@ async function parseEplus(url) {
       }
     }, {
       responseType: 'arraybuffer',
-      timeout: 15000,
+      timeout: 10000, // Уменьшим таймаут
       headers: {
-        'Accept': 'application/json, text/plain, */*',
-        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Origin': 'https://r.eplus.by',
-        'Referer': 'https://r.eplus.by/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"'
+        'Referer': 'https://r.eplus.by/'
       }
     });
 
@@ -90,7 +86,12 @@ async function parseEplus(url) {
     };
   } catch (e) {
     console.error('❌ Ошибка Евроопта:', e.message);
-    return { success: false, url, source: 'Euroopt' };
+
+    // Если 403 - значит бан
+    if (e.response && e.response.status === 403) {
+      return { success: false, url, error: 'IP Blocked by Euroopt' };
+    }
+    return { success: false, url, error: e.message };
   }
 }
 
