@@ -1,7 +1,7 @@
 const ogs = require('open-graph-scraper');
 const axios = require('axios');
 
-// --- ХЕЛПЕРЫ ДЛЯ WILDBERRIES ---
+// WB (Без изменений)
 function getWbHost(vol) {
   if (vol >= 0 && vol <= 143) return '01';
   if (vol >= 144 && vol <= 287) return '02';
@@ -31,56 +31,45 @@ async function parseWildberries(url) {
     const match = url.match(/catalog\/(\d+)/);
     if (!match) return null;
     const id = parseInt(match[1]);
-
     const vol = Math.floor(id / 100000);
     const part = Math.floor(id / 1000);
     const host = getWbHost(vol);
-
     const imageUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/images/big/1.webp`;
     const cardInfoUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/info/ru/card.json`;
-
     let title = null;
     try {
       const { data } = await axios.get(cardInfoUrl, { timeout: 1500 });
       title = data.imt_name || data.subj_name;
     } catch (e) { }
-
-    return {
-      title: title || `Товар WB (Арт: ${id})`,
-      image: imageUrl,
-      url
-    };
-  } catch (e) {
-    return null;
-  }
+    return { title: title || `Товар WB (Арт: ${id})`, image: imageUrl, url };
+  } catch (e) { return null; }
 }
 
-// --- ИЗВЛЕЧЕНИЕ ИЗ TELEGRAM PREVIEW ---
-// Теперь принимает msg напрямую
 async function extractFromTelegram(msg, telegramInstance) {
   const webPage = msg?.web_page;
   if (!webPage) return null;
 
-  console.log('📲 Using Telegram WebPage Preview for:', webPage.site_name || 'Site');
+  console.log('📲 Using Telegram WebPage Preview. Site:', webPage.site_name);
 
   let imageUrl = null;
-
+  // Проверяем, есть ли telegramInstance и фото
   if (webPage.photo && telegramInstance) {
     try {
+      // Берем последнее фото (наилучшее качество)
       const photoObj = webPage.photo[webPage.photo.length - 1];
-      const fileId = photoObj.file_id;
-      const link = await telegramInstance.getFileLink(fileId);
-      imageUrl = link.href;
+      if (photoObj && photoObj.file_id) {
+        const link = await telegramInstance.getFileLink(photoObj.file_id);
+        imageUrl = link.href;
+      }
     } catch (e) {
-      console.error('TG Photo Error:', e.message);
+      console.error('TG Photo Error (Non-fatal):', e.message);
+      // Не прерываем выполнение, просто останемся без картинки
     }
   }
 
-  const title = webPage.title || webPage.description || webPage.site_name || 'Товар';
-
   return {
-    title: title,
-    image: imageUrl,
+    title: webPage.title || webPage.description || webPage.site_name || 'Товар',
+    image: imageUrl, // Может быть null, и это ОК
     url: webPage.url
   };
 }
@@ -93,13 +82,9 @@ function getTitleFromUrl(url) {
     let slug = parts[parts.length - 1] || 'link';
     slug = slug.split('.')[0].replace(/\d{5,}/g, '').replace(/[-_]/g, ' ').trim();
     return slug.charAt(0).toUpperCase() + slug.slice(1) || 'Товар по ссылке';
-  } catch (e) {
-    return 'Ссылка';
-  }
+  } catch (e) { return 'Ссылка'; }
 }
 
-// --- ГЛАВНАЯ ФУНКЦИЯ ---
-// ВАЖНО: Второй аргумент теперь msgObject, третий - telegramInstance (ctx.telegram)
 async function extractMeta(url, msgObject = null, telegramInstance = null) {
   console.log('📥 Parsing:', url);
 
@@ -112,10 +97,11 @@ async function extractMeta(url, msgObject = null, telegramInstance = null) {
   // 2. TELEGRAM PREVIEW
   if (msgObject) {
     const tgData = await extractFromTelegram(msgObject, telegramInstance);
+    // Принимаем данные, если есть ХОТЯ БЫ ЗАГОЛОВОК
     if (tgData && tgData.title) {
       return {
         title: tgData.title,
-        image: tgData.image || 'https://via.placeholder.com/400x400?text=No+Image',
+        image: tgData.image || 'https://via.placeholder.com/400x400?text=No+Preview',
         url: url
       };
     }
@@ -126,22 +112,19 @@ async function extractMeta(url, msgObject = null, telegramInstance = null) {
     const options = {
       url: url,
       timeout: 5000,
-      fetchOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' } }
+      fetchOptions: { headers: { 'User-Agent': 'Mozilla/5.0' } }
     };
     const { result } = await ogs(options);
-
     if (result.ogTitle && (result.ogTitle.includes('Access Denied') || result.ogTitle.includes('Captcha'))) {
       throw new Error('Bot protection detected');
     }
-
     return {
       title: result.ogTitle || result.twitterTitle || getTitleFromUrl(url),
-      image: result.ogImage?.[0]?.url || result.ogImage?.url || 'https://via.placeholder.com/150?text=No+Image',
+      image: result.ogImage?.[0]?.url || result.ogImage?.url || 'https://via.placeholder.com/150?text=Link',
       url: url
     };
-
   } catch (e) {
-    console.error('❌ Meta Error (Fallback to URL):', e.message);
+    console.error('❌ Meta Error (Fallback):', e.message);
     return {
       title: getTitleFromUrl(url),
       image: 'https://via.placeholder.com/150?text=Link',
