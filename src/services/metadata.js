@@ -11,12 +11,12 @@ async function getLinkPreview(url) {
 
     const { data } = await axios.get(apiUrl, {
       headers: {
-        'X-Linkpreview-Api-Key': '86613dcec975a263a8042f2ea930ed7c' // Получи на https://www.linkpreview.net/
+        'X-Linkpreview-Api-Key': '86613dcec975a263a8042f2ea930ed7c' // Замени на свой ключ
       },
       timeout: 10000
     });
 
-    console.log('LinkPreview Response:', data.title ? 'OK' : 'Empty');
+    console.log('LinkPreview Response:', JSON.stringify(data).substring(0, 200));
 
     if (data.title) {
       return {
@@ -26,7 +26,11 @@ async function getLinkPreview(url) {
       };
     }
   } catch (e) {
-    console.error('LinkPreview API Error:', e.response?.status || e.message);
+    if (e.response) {
+      console.error('LinkPreview API Error:', e.response.status, e.response.data);
+    } else {
+      console.error('LinkPreview API Error:', e.message);
+    }
   }
   return null;
 }
