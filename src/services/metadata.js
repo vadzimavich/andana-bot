@@ -1,16 +1,14 @@
 const axios = require('axios');
 const config = require('../config');
-const cheerio = require('cheerio');
 
 function getProxyUrl(targetUrl, options = {}) {
   if (!config.SCRAPER_API_KEY) return targetUrl;
   const params = new URLSearchParams({
     api_key: config.SCRAPER_API_KEY,
     url: targetUrl,
-    country_code: 'by'
   });
   if (options.premium) params.append('premium', 'true');
-  // Рендеринг убираем — он слишком медленный и часто вызывает таймауты
+  // Убрали country_code: 'by', чтобы расширить пул рабочих IP
   return `http://api.scraperapi.com?${params.toString()}`;
 }
 
@@ -18,61 +16,58 @@ async function parseGoldApple(url) {
   try {
     const slug = url.split('/').pop().split('?')[0];
     const apiUrl = `https://goldapple.by/it_api/v1/catalog/product/by-url?url=${slug}`;
-    console.log('🍏 GoldApple: Fetching API via Premium Proxy...');
+    console.log('🍏 GoldApple: Fetching via Global Premium Proxy...');
 
     const { data } = await axios.get(getProxyUrl(apiUrl, { premium: true }), {
       headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1' },
-      timeout: 20000
+      timeout: 15000
     });
 
-    const product = data.data;
-    return {
-      title: `${product.attributes?.brand || ''} ${product.name}`.trim(),
-      image: product.image_url || product.media?.[0]?.url,
-      url: url
-    };
+    if (data?.data) {
+      const product = data.data;
+      return {
+        title: `${product.attributes?.brand || ''} ${product.name}`.trim(),
+        image: product.image_url || product.media?.[0]?.url,
+        url: url
+      };
+    }
   } catch (e) {
     console.error('❌ GoldApple Error:', e.message);
-    return null;
   }
+  return null;
 }
 
 async function parseOzon(url) {
   try {
-    console.log('🔵 Ozon: Fetching HTML via Premium Proxy...');
-    // Запрашиваем основную страницу, а не API
-    const { data: html } = await axios.get(getProxyUrl(url, { premium: true }), {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36' },
-      timeout: 25000
+    // Вытаскиваем SKU (цифры в конце пути перед слэшем или знаком вопроса)
+    const skuMatch = url.match(/\/product\/.*?(\d+)\/?/);
+    const sku = skuMatch ? skuMatch[1] : null;
+
+    if (!sku) {
+      console.log('🔵 Ozon: SKU not found in URL, skipping expert parser');
+      return null;
+    }
+
+    console.log(`🔵 Ozon: Fetching Short Info for SKU: ${sku}...`);
+    // Используем легкий API эндпоинт
+    const apiUrl = `https://www.ozon.ru/webapi/product/get-short-info?sku=${sku}`;
+
+    const { data } = await axios.get(getProxyUrl(apiUrl, { premium: true }), {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      timeout: 15000
     });
 
-    const $ = cheerio.load(html);
-
-    // Ищем разметку JSON-LD (она есть на всех страницах товаров Ozon)
-    const ldJsonText = $('script[type="application/ld+json"]').html();
-    if (ldJsonText) {
-      const ldData = JSON.parse(ldJsonText);
-      console.log('✅ Ozon: Found LD+JSON data');
+    if (data) {
       return {
-        title: ldData.name,
-        image: ldData.image,
+        title: data.name,
+        image: data.mainImage,
         url: url
       };
     }
-
-    // Если LD+JSON нет, пробуем обычные мета-теги
-    const title = $('meta[property="og:title"]').attr('content') || $('title').text();
-    const image = $('meta[property="og:image"]').attr('content');
-
-    return {
-      title: title.replace(' - купить на OZON', '').trim(),
-      image,
-      url
-    };
   } catch (e) {
     console.error('❌ Ozon Error:', e.message);
-    return null;
   }
+  return null;
 }
 
 async function parseWildberries(url) {
@@ -103,10 +98,13 @@ async function extractMeta(url, msgObject = null, telegramInstance = null) {
   else if (url.includes('ozon')) result = await parseOzon(url);
   else if (url.includes('wildberries') || url.includes('wb.ru')) result = await parseWildberries(url);
 
-  if (result && result.title && !result.title.includes('checking device')) return result;
+  // Если экспертный парсер вернул результат - отдаем его
+  if (result && result.title) return result;
 
-  // Если наши парсеры не справились — берем то, что видит Телеграм
+  // ФИНАЛЬНЫЙ FALLBACK: Берем данные из превью Телеграма
+  // Мы добавили sleep в контроллере, так что web_page должен быть тут
   if (msgObject?.web_page) {
+    console.log('📲 Using Telegram WebPage object as fallback');
     const wp = msgObject.web_page;
     let img = '';
     if (wp.photo && telegramInstance) {
@@ -116,10 +114,14 @@ async function extractMeta(url, msgObject = null, telegramInstance = null) {
         img = link.href;
       } catch (e) { }
     }
-    return { title: wp.title || getTitleFromUrl(url), image: img || result?.image, url };
+    return {
+      title: wp.title || wp.description || getTitleFromUrl(url),
+      image: img || (result ? result.image : ''),
+      url: url
+    };
   }
 
-  return { title: getTitleFromUrl(url), image: result?.image || '', url };
+  return { title: getTitleFromUrl(url), image: '', url };
 }
 
 module.exports = { extractMeta };
