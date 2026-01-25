@@ -32,25 +32,18 @@ async function parseWildberries(url) {
     if (!match) return null;
     const id = parseInt(match[1]);
 
-    // Математика WB для определения хоста
     const vol = Math.floor(id / 100000);
     const part = Math.floor(id / 1000);
     const host = getWbHost(vol);
 
-    // Ссылки на ресурсы
     const imageUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/images/big/1.webp`;
     const cardInfoUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/info/ru/card.json`;
 
     let title = null;
-
-    // Пробуем скачать JSON карточки (самый надежный способ, не требует заголовков)
     try {
       const { data } = await axios.get(cardInfoUrl, { timeout: 1500 });
       title = data.imt_name || data.subj_name;
-    } catch (e) {
-      // Игнорируем ошибку, попробуем fallback
-      console.log('WB JSON failed, using ID fallback');
-    }
+    } catch (e) { }
 
     return {
       title: title || `Товар WB (Арт: ${id})`,
@@ -58,61 +51,47 @@ async function parseWildberries(url) {
       url
     };
   } catch (e) {
-    console.error('WB Parse Error:', e.message);
     return null;
   }
 }
 
 // --- ИЗВЛЕЧЕНИЕ ИЗ TELEGRAM PREVIEW ---
-async function extractFromTelegram(ctx) {
-  // Поддержка и message, и editedMessage
-  const msg = ctx.message || ctx.editedMessage;
+// Теперь принимает msg напрямую
+async function extractFromTelegram(msg, telegramInstance) {
   const webPage = msg?.web_page;
-
   if (!webPage) return null;
 
   console.log('📲 Using Telegram WebPage Preview for:', webPage.site_name || 'Site');
 
   let imageUrl = null;
 
-  // Пытаемся достать фото из превью
-  if (webPage.photo) {
+  if (webPage.photo && telegramInstance) {
     try {
-      // Берем фото с наибольшим разрешением
       const photoObj = webPage.photo[webPage.photo.length - 1];
       const fileId = photoObj.file_id;
-      // Получаем прямую ссылку на файл через API Телеграма
-      const link = await ctx.telegram.getFileLink(fileId);
+      const link = await telegramInstance.getFileLink(fileId);
       imageUrl = link.href;
     } catch (e) {
       console.error('TG Photo Error:', e.message);
     }
   }
 
-  // Если заголовок пустой, пробуем site_name или описание
   const title = webPage.title || webPage.description || webPage.site_name || 'Товар';
 
   return {
     title: title,
     image: imageUrl,
-    url: webPage.url // Телеграм может развернуть сокращенную ссылку
+    url: webPage.url
   };
 }
 
-// --- FALLBACK (ПОСЛЕДНЯЯ НАДЕЖДА) ---
 function getTitleFromUrl(url) {
   try {
     const urlObj = new URL(url);
     const path = urlObj.pathname;
     const parts = path.split('/').filter(p => p);
     let slug = parts[parts.length - 1] || 'link';
-
-    // Чистим мусор из URL
-    slug = slug.split('.')[0]
-      .replace(/\d{5,}/g, '')
-      .replace(/[-_]/g, ' ')
-      .trim();
-
+    slug = slug.split('.')[0].replace(/\d{5,}/g, '').replace(/[-_]/g, ' ').trim();
     return slug.charAt(0).toUpperCase() + slug.slice(1) || 'Товар по ссылке';
   } catch (e) {
     return 'Ссылка';
@@ -120,20 +99,19 @@ function getTitleFromUrl(url) {
 }
 
 // --- ГЛАВНАЯ ФУНКЦИЯ ---
-async function extractMeta(url, ctx) {
+// ВАЖНО: Второй аргумент теперь msgObject, третий - telegramInstance (ctx.telegram)
+async function extractMeta(url, msgObject = null, telegramInstance = null) {
   console.log('📥 Parsing:', url);
 
-  // 1. СПЕЦ. ПАРСЕР WB (Работает лучше всего через их внутреннюю логику)
+  // 1. WB
   if (url.includes('wildberries') || url.includes('wb.ru')) {
     const wbData = await parseWildberries(url);
     if (wbData && wbData.title) return wbData;
   }
 
-  // 2. TELEGRAM PREVIEW (Спасает Ozon, GoldApple, Lamoda)
-  // Это обходит защиту от ботов, так как Телеграм уже всё скачал за нас
-  if (ctx && ctx.message) {
-    const tgData = await extractFromTelegram(ctx);
-    // Принимаем данные, если есть хотя бы заголовок
+  // 2. TELEGRAM PREVIEW
+  if (msgObject) {
+    const tgData = await extractFromTelegram(msgObject, telegramInstance);
     if (tgData && tgData.title) {
       return {
         title: tgData.title,
@@ -143,7 +121,7 @@ async function extractMeta(url, ctx) {
     }
   }
 
-  // 3. OGS (Обычный парсинг для остальных сайтов)
+  // 3. OGS (Fallback)
   try {
     const options = {
       url: url,
@@ -164,7 +142,6 @@ async function extractMeta(url, ctx) {
 
   } catch (e) {
     console.error('❌ Meta Error (Fallback to URL):', e.message);
-
     return {
       title: getTitleFromUrl(url),
       image: 'https://via.placeholder.com/150?text=Link',
