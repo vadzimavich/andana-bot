@@ -1,150 +1,54 @@
 const ogs = require('open-graph-scraper');
 const axios = require('axios');
-const cheerio = require('cheerio');
 
 const TELEGRAM_UA = 'TelegramBot (like TwitterBot)';
 
-const parsers = {
-  wildberries: async (url) => {
-    try {
-      const articleMatch = url.match(/catalog\/(\d+)/);
-      if (!articleMatch) return null;
+// LinkPreview API для сложных случаев
+async function getLinkPreview(url) {
+  try {
+    console.log('🔗 Using LinkPreview API');
+    const apiUrl = `https://api.linkpreview.net/?q=${encodeURIComponent(url)}`;
 
-      const article = articleMatch[1];
-      console.log('WB: Артикул', article);
+    const { data } = await axios.get(apiUrl, {
+      headers: {
+        'X-Linkpreview-Api-Key': '86613dcec975a263a8042f2ea930ed7c' // Получи на https://www.linkpreview.net/
+      },
+      timeout: 10000
+    });
 
-      // Попробуем разные User-Agent'ы
-      const userAgents = [
-        TELEGRAM_UA,
-        'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)',
-        'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)',
-        'Twitterbot/1.0'
-      ];
+    console.log('LinkPreview Response:', data.title ? 'OK' : 'Empty');
 
-      for (const ua of userAgents) {
-        try {
-          const { data } = await axios.get(url, {
-            headers: {
-              'User-Agent': ua,
-              'Accept': 'text/html'
-            },
-            timeout: 8000
-          });
-
-          const $ = cheerio.load(data);
-          const title = $('meta[property="og:title"]').attr('content');
-          const imageUrl = $('meta[property="og:image"]').attr('content');
-
-          if (title) {
-            console.log('WB: Success with', ua.split('/')[0]);
-            return {
-              title: title.substring(0, 150),
-              image: imageUrl || 'https://via.placeholder.com/400',
-              url: url
-            };
-          }
-        } catch (e) {
-          console.log('WB: Failed with', ua.split('/')[0], '-', e.response?.status || e.message);
-          continue;
-        }
-      }
-    } catch (e) {
-      console.error('WB Parser Error:', e.message);
+    if (data.title) {
+      return {
+        title: data.title.substring(0, 150),
+        image: data.image || 'https://via.placeholder.com/400x400/e8e8e8/888888?text=Товар',
+        url: url
+      };
     }
-    return null;
-  },
-
-  ozon: async (url) => {
-    try {
-      console.log('Ozon: Parsing', url);
-
-      // НЕ следуем редиректам - парсим короткую ссылку напрямую
-      const { data } = await axios.get(url, {
-        headers: {
-          'User-Agent': TELEGRAM_UA,
-          'Accept': 'text/html'
-        },
-        maxRedirects: 0, // ВАЖНО: не следуем редиректам!
-        validateStatus: (status) => status < 400 || status === 301 || status === 302,
-        timeout: 10000
-      });
-
-      const $ = cheerio.load(data);
-
-      let title = $('meta[property="og:title"]').attr('content');
-      let imageUrl = $('meta[property="og:image"]').attr('content');
-
-      console.log('Ozon: Title:', title);
-      console.log('Ozon: Image:', imageUrl);
-
-      if (title) {
-        return {
-          title: title.substring(0, 150),
-          image: imageUrl || 'https://via.placeholder.com/400',
-          url: url
-        };
-      }
-    } catch (e) {
-      // Если произошёл редирект, попробуем получить финальный URL
-      if (e.response?.status === 301 || e.response?.status === 302) {
-        const finalUrl = e.response.headers.location;
-        console.log('Ozon: Redirect to', finalUrl);
-
-        try {
-          const { data } = await axios.get(finalUrl, {
-            headers: { 'User-Agent': TELEGRAM_UA },
-            timeout: 10000
-          });
-
-          const $ = cheerio.load(data);
-          const title = $('meta[property="og:title"]').attr('content');
-          const imageUrl = $('meta[property="og:image"]').attr('content');
-
-          if (title) {
-            return {
-              title: title.substring(0, 150),
-              image: imageUrl || 'https://via.placeholder.com/400',
-              url: url
-            };
-          }
-        } catch (err) {
-          console.error('Ozon Redirect Error:', err.message);
-        }
-      } else {
-        console.error('Ozon Parser Error:', e.message);
-      }
-    }
-    return null;
+  } catch (e) {
+    console.error('LinkPreview API Error:', e.response?.status || e.message);
   }
-};
+  return null;
+}
 
 async function extractMeta(url) {
   try {
     console.log('📥 Extracting meta from:', url);
 
-    // WildBerries
-    if (url.includes('wildberries') || url.includes('wb.ru')) {
-      console.log('🛍 Detected: Wildberries');
-      const wbData = await parsers.wildberries(url);
-      if (wbData) {
-        console.log('✅ WB Success');
-        return wbData;
+    // Для WB и Ozon сразу используем LinkPreview API
+    if (url.includes('wildberries') || url.includes('wb.ru') || url.includes('ozon.')) {
+      const marketplace = url.includes('ozon') ? 'Ozon' : 'Wildberries';
+      console.log(`🛍 Detected: ${marketplace}`);
+
+      const apiData = await getLinkPreview(url);
+      if (apiData) {
+        console.log(`✅ ${marketplace} Success via API`);
+        return apiData;
       }
-      console.log('⚠️ WB failed');
+      console.log(`⚠️ ${marketplace} API failed, trying fallback`);
     }
 
-    // Ozon
-    if (url.includes('ozon.')) {
-      console.log('🛍 Detected: Ozon');
-      const ozonData = await parsers.ozon(url);
-      if (ozonData) {
-        console.log('✅ Ozon Success');
-        return ozonData;
-      }
-      console.log('⚠️ Ozon failed');
-    }
-
-    // Универсальный парсер (AliExpress и др.)
+    // Для остальных (AliExpress и др.) - Open Graph Scraper
     console.log('🔄 Using Open Graph Scraper');
     const options = {
       url: url,
@@ -184,6 +88,14 @@ async function extractMeta(url) {
 
   } catch (e) {
     console.error('❌ Fatal Error:', e.message);
+
+    // Последний шанс - пробуем LinkPreview API
+    console.log('🔄 Last resort: LinkPreview API');
+    const apiData = await getLinkPreview(url);
+    if (apiData) {
+      console.log('✅ Recovered via API');
+      return apiData;
+    }
 
     return {
       title: 'Товар (не удалось получить данные)',
