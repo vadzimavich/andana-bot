@@ -32,32 +32,24 @@ async function parseWildberries(url) {
     if (!match) return null;
     const id = parseInt(match[1]);
 
-    // 1. Картинка (Математика)
+    // Математика WB для определения хоста
     const vol = Math.floor(id / 100000);
     const part = Math.floor(id / 1000);
     const host = getWbHost(vol);
+
+    // Ссылки на ресурсы
     const imageUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/images/big/1.webp`;
+    const cardInfoUrl = `https://basket-${host}.wbbasket.ru/vol${vol}/part${part}/${id}/info/ru/card.json`;
 
-    // 2. Название (Пробуем разные API)
     let title = null;
-    const endpoints = [
-      `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`,
-      `https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=-1257786&spp=30&nm=${id}`,
-      `https://wbx-content-v2.wbstatic.net/ru/${id}.json` // Статический JSON (самый надежный)
-    ];
 
-    for (const api of endpoints) {
-      try {
-        const { data } = await axios.get(api, { timeout: 2000 });
-        if (data?.data?.products?.[0]?.name) {
-          title = data.data.products[0].name;
-          break;
-        }
-        if (data?.subj_name || data?.imt_name) { // Для static JSON
-          title = data.imt_name || data.subj_name;
-          break;
-        }
-      } catch (e) { }
+    // Пробуем скачать JSON карточки (самый надежный способ, не требует заголовков)
+    try {
+      const { data } = await axios.get(cardInfoUrl, { timeout: 1500 });
+      title = data.imt_name || data.subj_name;
+    } catch (e) {
+      // Игнорируем ошибку, попробуем fallback
+      console.log('WB JSON failed, using ID fallback');
     }
 
     return {
@@ -66,23 +58,28 @@ async function parseWildberries(url) {
       url
     };
   } catch (e) {
+    console.error('WB Parse Error:', e.message);
     return null;
   }
 }
 
-// --- ПАРСИНГ ИЗ TELEGRAM PREVIEW ---
+// --- ИЗВЛЕЧЕНИЕ ИЗ TELEGRAM PREVIEW ---
 async function extractFromTelegram(ctx) {
-  const webPage = ctx.message.web_page;
+  // Проверяем, есть ли превью
+  const webPage = ctx.message?.web_page;
   if (!webPage) return null;
 
-  console.log('📲 Using Telegram WebPage Preview');
+  console.log('📲 Using Telegram WebPage Preview for:', webPage.site_name || 'Site');
 
   let imageUrl = null;
-  // Если у превью есть фото, получаем его URL
+
+  // Пытаемся достать фото из превью
   if (webPage.photo) {
     try {
-      // Берем самый большой размер
-      const fileId = webPage.photo[webPage.photo.length - 1].file_id;
+      // Берем фото с наибольшим разрешением
+      const photoObj = webPage.photo[webPage.photo.length - 1];
+      const fileId = photoObj.file_id;
+      // Получаем прямую ссылку на файл через API Телеграма
       const link = await ctx.telegram.getFileLink(fileId);
       imageUrl = link.href;
     } catch (e) {
@@ -90,33 +87,31 @@ async function extractFromTelegram(ctx) {
     }
   }
 
+  // Если заголовок пустой, пробуем site_name или описание
+  const title = webPage.title || webPage.description || webPage.site_name || 'Товар';
+
   return {
-    title: webPage.title || webPage.site_name || 'Товар',
-    image: imageUrl, // Может быть null, тогда подставится заглушка позже
-    url: webPage.url
+    title: title,
+    image: imageUrl,
+    url: webPage.url // Телеграм может развернуть сокращенную ссылку
   };
 }
 
-// --- FALLBACK ИЗ URL ---
+// --- FALLBACK (ПОСЛЕДНЯЯ НАДЕЖДА) ---
 function getTitleFromUrl(url) {
   try {
     const urlObj = new URL(url);
     const path = urlObj.pathname;
     const parts = path.split('/').filter(p => p);
-    // Берем последний сегмент, если он длинный, иначе предпоследний
-    let slug = parts[parts.length - 1];
-    if (!slug || slug.length < 4) slug = parts[parts.length - 2];
+    let slug = parts[parts.length - 1] || 'link';
 
-    if (!slug) return 'Товар по ссылке';
-
-    // Убираем ID, расширения и мусор
-    slug = slug.split('.')[0] // убрать .html
-      .replace(/\d{5,}/g, '') // убрать длинные цифры
-      .replace(/[-_]/g, ' ') // заменить дефисы на пробелы
+    // Чистим мусор из URL
+    slug = slug.split('.')[0]
+      .replace(/\d{5,}/g, '')
+      .replace(/[-_]/g, ' ')
       .trim();
 
-    // Делаем первую букву заглавной
-    return slug.charAt(0).toUpperCase() + slug.slice(1);
+    return slug.charAt(0).toUpperCase() + slug.slice(1) || 'Товар по ссылке';
   } catch (e) {
     return 'Ссылка';
   }
@@ -126,10 +121,17 @@ function getTitleFromUrl(url) {
 async function extractMeta(url, ctx) {
   console.log('📥 Parsing:', url);
 
-  // 1. ПРИОРИТЕТ: Данные от Telegram (если есть превью)
-  // Это спасет Ozon и GoldApple
-  if (ctx && ctx.message && ctx.message.web_page) {
+  // 1. СПЕЦ. ПАРСЕР WB (Работает лучше всего через их внутреннюю логику)
+  if (url.includes('wildberries') || url.includes('wb.ru')) {
+    const wbData = await parseWildberries(url);
+    if (wbData && wbData.title) return wbData;
+  }
+
+  // 2. TELEGRAM PREVIEW (Спасает Ozon, GoldApple, Lamoda)
+  // Это обходит защиту от ботов, так как Телеграм уже всё скачал за нас
+  if (ctx && ctx.message) {
     const tgData = await extractFromTelegram(ctx);
+    // Принимаем данные, если есть хотя бы заголовок
     if (tgData && tgData.title) {
       return {
         title: tgData.title,
@@ -139,34 +141,28 @@ async function extractMeta(url, ctx) {
     }
   }
 
-  // 2. WILDBERRIES (Спец. парсер)
-  if (url.includes('wildberries') || url.includes('wb.ru')) {
-    const wbData = await parseWildberries(url);
-    if (wbData) return wbData;
-  }
-
-  // 3. OGS (Для AliExpress, Lamoda и остальных)
+  // 3. OGS (Обычный парсинг для остальных сайтов)
   try {
     const options = {
       url: url,
-      timeout: 10000,
-      fetchOptions: { headers: { 'User-Agent': 'TelegramBot (like TwitterBot)' } }
+      timeout: 5000,
+      fetchOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' } }
     };
     const { result } = await ogs(options);
 
-    let title = result.ogTitle || result.twitterTitle;
-    // Проверка на защиту
-    if (title && (title.includes('checking') || title.includes('Access Denied'))) throw new Error('Bot protection');
+    if (result.ogTitle && (result.ogTitle.includes('Access Denied') || result.ogTitle.includes('Captcha'))) {
+      throw new Error('Bot protection detected');
+    }
 
     return {
-      title: title || getTitleFromUrl(url),
+      title: result.ogTitle || result.twitterTitle || getTitleFromUrl(url),
       image: result.ogImage?.[0]?.url || result.ogImage?.url || 'https://via.placeholder.com/150?text=No+Image',
       url: url
     };
 
   } catch (e) {
-    console.error('❌ Meta Error:', e.message);
-    // 4. ПОЛНЫЙ FALLBACK
+    console.error('❌ Meta Error (Fallback to URL):', e.message);
+
     return {
       title: getTitleFromUrl(url),
       image: 'https://via.placeholder.com/150?text=Link',

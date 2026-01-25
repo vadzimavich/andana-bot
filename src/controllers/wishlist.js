@@ -3,6 +3,8 @@ const google = require('../services/google');
 const meta = require('../services/metadata');
 const config = require('../config');
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 module.exports = {
   async handleTopicMessage(ctx) {
     const text = ctx.message.text;
@@ -15,11 +17,18 @@ module.exports = {
     // Ищем ссылку
     const urlMatch = text.match(/(https?:\/\/[^\s]+)/);
     if (urlMatch) {
-      const m = await ctx.reply('🔎 Парсим товар...');
       const url = urlMatch[0];
 
+      // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+      // Ждем 1.5 секунды, чтобы Telegram успел подгрузить web_page (превью)
+      // Это критично для Ozon и Золотого Яблока
+      await ctx.replyWithChatAction('typing');
+      await sleep(1500);
+      // -----------------------
+
+      const m = await ctx.reply('🔎 Сохраняю...');
+
       try {
-        // ВАЖНО: Передаем ctx вторым аргументом!
         const data = await meta.extractMeta(url, ctx);
 
         await google.appendRow('Wishlist', [
@@ -35,20 +44,19 @@ module.exports = {
 
         const webLink = `${config.APP_URL}/wishlist`;
 
-        // Если есть картинка - шлем с картинкой
-        if (data.image && !data.image.includes('placeholder')) {
-          await ctx.replyWithPhoto(data.image, {
-            caption: `✨ *Добавлено!*\n🏷 ${data.title}\n\n🌐 [Вишлист](${webLink})`,
-            parse_mode: 'Markdown'
-          });
+        // Формируем красивое сообщение
+        const caption = `✨ *Добавлено в вишлист!*\n🏷 ${data.title}\n\n🌐 [Открыть каталог](${webLink})`;
+
+        if (data.image && data.image.startsWith('http')) {
+          await ctx.replyWithPhoto(data.image, { caption, parse_mode: 'Markdown' });
         } else {
-          ctx.reply(`✨ *Добавлено!*\n🏷 ${data.title}\n\n🌐 [Вишлист](${webLink})`, { parse_mode: 'Markdown' });
+          await ctx.reply(caption, { parse_mode: 'Markdown', disable_web_page_preview: true });
         }
 
       } catch (e) {
         console.error('Wishlist Error:', e);
         await ctx.deleteMessage(m.message_id).catch(() => { });
-        ctx.reply('❌ Не удалось добавить товар.');
+        ctx.reply('❌ Не удалось добавить товар (ошибка таблицы).');
       }
     }
   },
