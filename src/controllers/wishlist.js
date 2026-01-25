@@ -3,11 +3,11 @@ const google = require('../services/google');
 const meta = require('../services/metadata');
 const config = require('../config');
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
 module.exports = {
   async handleTopicMessage(ctx) {
-    const text = ctx.message.text;
+    // Берем сообщение или его отредактированную версию
+    const msg = ctx.message || ctx.editedMessage;
+    const text = msg.text;
 
     if (text === '/undo') {
       const success = await google.deleteLastRow('Wishlist');
@@ -19,16 +19,24 @@ module.exports = {
     if (urlMatch) {
       const url = urlMatch[0];
 
-      // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-      // Ждем 1.5 секунды, чтобы Telegram успел подгрузить web_page (превью)
-      // Это критично для Ozon и Золотого Яблока
-      await ctx.replyWithChatAction('typing');
-      await sleep(1500);
-      // -----------------------
+      // --- ЛОГИКА "ЖДУНА" ---
+      // Список доменов, которые мы НЕ парсим сами, а ждем превью от Телеграма
+      const hardDomains = ['ozon', 'goldapple', 'lamoda'];
+      const isHardDomain = hardDomains.some(d => url.includes(d));
+      const hasPreview = msg.web_page;
+
+      // Если это сложный домен и превью ЕЩЕ нет -> игнорируем.
+      // Ждем, пока Телеграм обновит сообщение (сработает edited_message)
+      if (isHardDomain && !hasPreview) {
+        console.log('⏳ Waiting for Telegram preview for:', url);
+        return;
+      }
+      // ----------------------
 
       const m = await ctx.reply('🔎 Сохраняю...');
 
       try {
+        // Передаем ctx, чтобы extractMeta мог залезть в web_page
         const data = await meta.extractMeta(url, ctx);
 
         await google.appendRow('Wishlist', [
@@ -43,12 +51,17 @@ module.exports = {
         await ctx.deleteMessage(m.message_id).catch(() => { });
 
         const webLink = `${config.APP_URL}/wishlist`;
-
-        // Формируем красивое сообщение
         const caption = `✨ *Добавлено в вишлист!*\n🏷 ${data.title}\n\n🌐 [Открыть каталог](${webLink})`;
 
-        if (data.image && data.image.startsWith('http')) {
-          await ctx.replyWithPhoto(data.image, { caption, parse_mode: 'Markdown' });
+        // --- БЕЗОПАСНАЯ ОТПРАВКА ---
+        // Если картинки нет или она "битая" (placeholder), шлем просто текст
+        if (data.image && data.image.startsWith('http') && !data.image.includes('placeholder')) {
+          try {
+            await ctx.replyWithPhoto(data.image, { caption, parse_mode: 'Markdown' });
+          } catch (imgError) {
+            console.error('Image send failed, sending text only:', imgError.message);
+            await ctx.reply(caption, { parse_mode: 'Markdown', disable_web_page_preview: true });
+          }
         } else {
           await ctx.reply(caption, { parse_mode: 'Markdown', disable_web_page_preview: true });
         }
@@ -61,7 +74,6 @@ module.exports = {
     }
   },
 
-  // ... (остальные методы без изменений)
   async sendInterface(ctx) {
     const webLink = `${config.APP_URL}/wishlist`;
     const text = `🎁 *Тема: Вишлисты*\nКидай сюда ссылки.\n\n🌐 [Открыть каталог](${webLink})`;

@@ -79,25 +79,37 @@ bot.use(async (ctx, next) => {
 });
 
 // --- TOPIC ROUTER ---
-bot.on('message', async (ctx, next) => {
-  if (ctx.chat.type === 'private' || ctx.message.text?.startsWith('/') || !ctx.message.message_thread_id) {
-    if (ctx.message.text?.startsWith('/link')) return Settings.linkTopic(ctx);
+const topicRouter = async (ctx, next) => {
+  // Работаем и с обычным сообщением, и с отредактированным
+  const msg = ctx.message || ctx.editedMessage;
+
+  if (!msg) return next();
+
+  // Игнорируем личку и команды в этом роутере
+  if (ctx.chat.type === 'private' || msg.text?.startsWith('/')) {
+    if (msg.text?.startsWith('/link')) return Settings.linkTopic(ctx);
     return next();
   }
 
-  const topicId = ctx.message.message_thread_id;
-  const topicType = Settings.getTopicType(topicId);
+  const topicId = msg.message_thread_id;
+  if (!topicId) return next();
 
+  const topicType = Settings.getTopicType(topicId);
   if (!topicType) return next();
 
+  // Роутинг по типам тем
   if (topicType === config.TOPICS.EXPENSES) return Finance.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.SHOPPING) return Shopping.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.INBOX) return Tasks.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.WISHLIST) return Wishlist.handleTopicMessage(ctx);
-  if (topicType === 'control') return Control.handleAction(ctx); // Для ТВ
+  if (topicType === 'control') return Control.handleAction(ctx);
 
   return next();
-});
+};
+
+bot.on('message', topicRouter);
+bot.on('edited_message', topicRouter);
+
 
 // --- MENU TRIGGERS ---
 const trigger = (text, handler) => {

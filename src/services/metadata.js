@@ -65,8 +65,10 @@ async function parseWildberries(url) {
 
 // --- ИЗВЛЕЧЕНИЕ ИЗ TELEGRAM PREVIEW ---
 async function extractFromTelegram(ctx) {
-  // Проверяем, есть ли превью
-  const webPage = ctx.message?.web_page;
+  // Поддержка и message, и editedMessage
+  const msg = ctx.message || ctx.editedMessage;
+  const webPage = msg?.web_page;
+
   if (!webPage) return null;
 
   console.log('📲 Using Telegram WebPage Preview for:', webPage.site_name || 'Site');
