@@ -1,17 +1,23 @@
 const axios = require('axios');
 const config = require('../config');
 
-// Хелпер для прокси. Теперь он просто и надежно формирует URL.
-function getProxyUrl(targetUrl) {
+// Обновленный хелпер для прокси
+function getProxyUrl(targetUrl, options = {}) {
   if (!config.SCRAPER_API_KEY) {
-    console.log('⚠️ ScraperAPI key not found, using direct request. This will likely fail.');
+    console.log('⚠️ ScraperAPI key not found, using direct request.');
     return targetUrl;
   }
+
   const params = new URLSearchParams({
     api_key: config.SCRAPER_API_KEY,
     url: targetUrl,
-    country_code: 'by' // Явно указываем, что мы из Беларуси
   });
+
+  // Добавляем премиум-флаг, если он нужен
+  if (options.premium) {
+    params.append('premium', 'true');
+  }
+
   return `http://api.scraperapi.com?${params.toString()}`;
 }
 
@@ -20,9 +26,10 @@ async function parseGoldApple(url) {
     const slug = url.split('/').pop().split('?')[0];
     const apiUrl = `https://goldapple.by/it_api/v1/catalog/product/by-url?url=${slug}`;
 
-    console.log('🍏 GoldApple API Fetch:', apiUrl);
+    console.log('🍏 GoldApple Fetch (via Premium Proxy)...');
 
-    const { data } = await axios.get(getProxyUrl(apiUrl), { timeout: 20000 });
+    // Используем премиум-прокси
+    const { data } = await axios.get(getProxyUrl(apiUrl, { premium: true }), { timeout: 25000 });
 
     const product = data.data;
     return {
@@ -32,10 +39,7 @@ async function parseGoldApple(url) {
     };
   } catch (e) {
     console.error('❌ GoldApple Error:', e.message);
-    if (e.response) {
-      console.error('-> Status:', e.response.status);
-      console.error('-> Data:', JSON.stringify(e.response.data, null, 2));
-    }
+    if (e.response) console.error('-> Data:', e.response.data);
     return null;
   }
 }
@@ -44,28 +48,25 @@ async function parseOzon(url) {
   const path = new URL(url).pathname;
   const apiUrl = `https://www.ozon.by/api/composer-api.bx/page/json/v2?url=${path}`;
 
-  // --- ИМИТАЦИЯ МОБИЛЬНОГО ПРИЛОЖЕНИЯ ---
   const headers = {
     'User-Agent': 'ozonapp_by/16.18.0 (Android 13; Pixel 7)',
     'X-O3-App-Name': 'ozonapp_by',
     'X-O3-App-Version': '16.18.0(100024)',
     'X-O3-Device-Type': 'mobile',
-    'Accept': 'application/json',
-    'Accept-Language': 'ru-BY',
   };
 
-  console.log('🔵 Ozon API Fetch:', apiUrl);
-  console.log('🔵 With Headers:', headers);
+  console.log('🔵 Ozon API Fetch (via Premium Proxy)...');
 
   try {
-    const proxiedUrl = getProxyUrl(apiUrl);
+    // Используем премиум-прокси
+    const proxiedUrl = getProxyUrl(apiUrl, { premium: true });
     const { data } = await axios.get(proxiedUrl, { headers, timeout: 25000 });
 
     console.log('✅ Ozon API response received!');
 
     const states = data.widgetStates;
     if (!states) {
-      console.error('❌ Ozon Error: widgetStates is missing in response.');
+      console.error('❌ Ozon Error: widgetStates is missing.');
       return null;
     }
 
@@ -79,13 +80,8 @@ async function parseOzon(url) {
     return { title, image, url };
 
   } catch (e) {
-    console.error('❌❌❌ OZON FATAL ERROR ❌❌❌');
-    console.error('-> Message:', e.message);
-    if (e.response) {
-      console.error('-> Status:', e.response.status);
-      console.error('-> Headers:', JSON.stringify(e.response.headers, null, 2));
-      console.error('-> Data:', JSON.stringify(e.response.data, null, 2));
-    }
+    console.error('❌ Ozon Error:', e.message);
+    if (e.response) console.error('-> Data:', e.response.data);
     return null;
   }
 }
