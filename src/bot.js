@@ -14,6 +14,7 @@ const Weight = require('./controllers/weight');
 const Plan = require('./controllers/plan');
 const Settings = require('./controllers/settings');
 const Wishlist = require('./controllers/wishlist');
+const Control = require('./controllers/control');
 
 const path = require('path'); // Node standard lib
 
@@ -84,19 +85,16 @@ bot.on('message', async (ctx, next) => {
     return next();
   }
 
-  // 1. Сначала объявляем переменные
   const topicId = ctx.message.message_thread_id;
   const topicType = Settings.getTopicType(topicId);
 
-  // 2. Потом проверяем
   if (!topicType) return next();
 
-  // 3. Потом роутим
   if (topicType === config.TOPICS.EXPENSES) return Finance.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.SHOPPING) return Shopping.handleTopicMessage(ctx);
   if (topicType === config.TOPICS.INBOX) return Tasks.handleTopicMessage(ctx);
-  // Обрати внимание: в config.js у тебя 'wishlist', а не 'ideas'
   if (topicType === config.TOPICS.WISHLIST) return Wishlist.handleTopicMessage(ctx);
+  if (topicType === 'control') return Control.handleAction(ctx); // Для ТВ
 
   return next();
 });
@@ -148,6 +146,9 @@ trigger('📋 Меню темы', async (ctx) => {
 
   ctx.replyWithMarkdown(text, Markup.inlineKeyboard(buttons));
 });
+
+trigger('📺 ТВ', Control.sendInterface);
+
 
 bot.start(General.start);
 
@@ -227,6 +228,8 @@ bot.action('undo_finance', (ctx) => handleUndo(ctx, 'Finances', 'Расхода�
 bot.action('undo_shopping', (ctx) => handleUndo(ctx, 'Shopping', 'Покупках'));
 bot.action('undo_task', (ctx) => handleUndo(ctx, 'Inbox', 'Задачах'));
 bot.action('wishlist_undo', Wishlist.undo);
+
+bot.action(/^tv_/, Control.handleAction);
 
 // --- TEXT ---
 bot.on('text', async (ctx) => {
