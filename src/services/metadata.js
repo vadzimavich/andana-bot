@@ -1,21 +1,21 @@
 const axios = require('axios');
 
 async function extractMeta(url) {
-  console.log('🔍 Delegating all parsing to Google:', url);
+  console.log('🔍 Parsing via Google GAS:', url);
 
   const gasUrl = process.env.GAS_PARSER_URL;
-  if (!gasUrl) return { title: 'Товар (настрой GAS_PARSER_URL)', image: '', url };
+  if (!gasUrl) return { title: 'Настрой GAS_PARSER_URL', image: '', url };
 
   try {
-    // Отправляем "чистый" URL без параметров слежки
+    // Убираем параметры из URL для чистоты запроса
     const cleanUrl = url.split('?')[0];
     const { data } = await axios.get(gasUrl, {
       params: { url: cleanUrl },
       timeout: 25000
     });
 
-    if (data && data.title) {
-      console.log('✅ Google Success:', data.title);
+    if (data && data.title && !data.title.includes('Debug') && !data.title.includes('Ошибка')) {
+      console.log('✅ Success:', data.title);
       return {
         title: data.title,
         image: data.image || '',
@@ -26,9 +26,10 @@ async function extractMeta(url) {
     console.error('❌ GAS Error:', e.message);
   }
 
-  // Совсем крайний случай
+  // Крайний случай: вырезаем название из ссылки
   const slug = new URL(url).pathname.split('/').filter(Boolean).pop() || 'Товар';
-  return { title: slug.replace(/[-_]/g, ' ').substring(0, 60), image: '', url };
+  const fallbackTitle = slug.replace(/[-_]/g, ' ').substring(0, 60);
+  return { title: fallbackTitle, image: '', url };
 }
 
 module.exports = { extractMeta };
