@@ -4,18 +4,16 @@ const ogs = require('open-graph-scraper');
 async function extractMeta(url) {
   console.log('🔍 Router parsing:', url);
 
-  // 1. ALIEXPRESS / LAMODA -> Локально (OGS)
-  // Это работало раньше, возвращаем как было.
-  if (url.includes('ali') || url.includes('lamoda')) {
+  // 1. LAMODA -> Локально (OGS работает отлично)
+  if (url.includes('lamoda')) {
     try {
-      console.log('🌍 Using local OGS for Ali/Lamoda...');
+      console.log('🌍 Using local OGS for Lamoda...');
       const options = {
         url: url,
         timeout: 10000,
         fetchOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' } }
       };
       const { result } = await ogs(options);
-
       if (result.ogTitle) {
         console.log('✅ OGS Success:', result.ogTitle);
         return {
@@ -29,20 +27,23 @@ async function extractMeta(url) {
     }
   }
 
-  // 2. WB / OZON / GOLD APPLE -> Google Apps Script
+  // 2. ВСЕ ОСТАЛЬНОЕ -> Google Apps Script
+  // WB, Ozon, Ali, GoldApple, 21vek, Onliner
   const gasUrl = process.env.GAS_PARSER_URL;
   if (gasUrl) {
     try {
       console.log('🚀 Delegating to Google...');
+      // Чистим URL от лишних параметров, но оставляем важные для Ali
+      const cleanUrl = url.includes('ali') ? url : url.split('?')[0];
+
       const { data } = await axios.get(gasUrl, {
-        params: { url: url },
+        params: { url: cleanUrl },
         timeout: 30000
       });
 
-      // Логируем дебаг из Гугла
       if (data.debug) console.log('📝 GAS Debug:', data.debug);
 
-      if (data && data.title && !data.title.includes('Error')) {
+      if (data && data.title && !data.title.includes('Error') && data.title !== "Товар по ссылке") {
         console.log('✅ Google Success:', data.title);
         return {
           title: data.title,
