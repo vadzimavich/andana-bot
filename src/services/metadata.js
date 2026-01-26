@@ -170,5 +170,5 @@ async function extractMeta(url) {
   const slug = new URL(url).pathname.split('/').filter(Boolean).pop() || 'Товар';
   return { title: slug.replace(/[-_]/g, ' ').substring(0, 60), image: '', url };
 }
-
+}
 module.exports = { extractMeta };
