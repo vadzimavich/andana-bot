@@ -1,35 +1,33 @@
 const axios = require('axios');
 
 async function extractMeta(url) {
-  console.log('🔍 Parsing via Google GAS:', url);
+  console.log('🔍 Parsing URL:', url);
 
   const gasUrl = process.env.GAS_PARSER_URL;
   if (!gasUrl) return { title: 'Настрой GAS_PARSER_URL', image: '', url };
 
   try {
-    // Убираем параметры из URL для чистоты запроса
-    const cleanUrl = url.split('?')[0];
     const { data } = await axios.get(gasUrl, {
-      params: { url: cleanUrl },
-      timeout: 25000
+      params: { url: url },
+      timeout: 30000
     });
 
-    if (data && data.title && !data.title.includes('Debug') && !data.title.includes('Ошибка')) {
-      console.log('✅ Success:', data.title);
-      return {
-        title: data.title,
-        image: data.image || '',
-        url: url
-      };
+    if (data) {
+      // ВЫВОДИМ ДЕБАГ ЛОГИ ИЗ ГУГЛА
+      if (data.debug) console.log('📝 GAS Debug Path:', data.debug);
+
+      if (data.title && !data.title.includes('Fallback') && !data.title.includes('Error')) {
+        console.log('✅ Success:', data.title);
+        return { title: data.title, image: data.image || '', url: url };
+      }
     }
   } catch (e) {
-    console.error('❌ GAS Error:', e.message);
+    console.error('❌ GAS Request Failed:', e.message);
   }
 
-  // Крайний случай: вырезаем название из ссылки
+  // Крайний случай
   const slug = new URL(url).pathname.split('/').filter(Boolean).pop() || 'Товар';
-  const fallbackTitle = slug.replace(/[-_]/g, ' ').substring(0, 60);
-  return { title: fallbackTitle, image: '', url };
+  return { title: slug.replace(/[-_]/g, ' ').substring(0, 60), image: '', url };
 }
 
 module.exports = { extractMeta };
