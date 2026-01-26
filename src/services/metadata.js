@@ -1,6 +1,11 @@
 const axios = require('axios');
 const ogs = require('open-graph-scraper');
 
+if (require.main === module) {
+  extractMeta('https://ozon.by/product/kofe-v-zernah-sibaristica-efiopiya-irgacheff-1-kg-srednyaya-obzharka-876315989/')
+    .then(console.log)
+    .catch(console.error);
+}
 // --- ЛОКАЛЬНЫЙ ПАРСЕР WILDBERRIES ---
 async function parseWildberriesLocal(url) {
   try {
@@ -49,6 +54,32 @@ async function extractMeta(url) {
     if (wbData) {
       console.log('✅ WB Local Success');
       return wbData;
+    }
+  }
+
+  // 1. OZON
+  if (url.includes('ozon')) {
+    const ozonData = await parseOzonDirect(url);
+    if (ozonData) return ozonData;
+
+    // Fallback на GAS только если прямой метод не сработал
+    const gasUrl = process.env.GAS_PARSER_URL;
+    if (gasUrl) {
+      try {
+        console.log('🚀 Ozon Fallback to Google...');
+        const cleanUrl = url.replace('ozon.by', 'ozon.ru').split('?')[0];
+        const { data } = await axios.get(gasUrl, {
+          params: { url: cleanUrl },
+          timeout: 30000
+        });
+
+        if (data?.title && !data.title.includes('Error') && !data.title.includes('Redirect')) {
+          console.log('✅ Google Success:', data.title);
+          return { title: data.title, image: data.image || '', url };
+        }
+      } catch (e) {
+        console.error('❌ GAS Ozon Error:', e.message);
+      }
     }
   }
 
@@ -115,7 +146,7 @@ async function extractMeta(url) {
     }
   }
 
-  // 4. OZON / GOLD APPLE (Только они летят в Google)
+  // 4. GOLD APPLE (Только они летят в Google)
   const gasUrl = process.env.GAS_PARSER_URL;
   if (gasUrl && (url.includes('ozon') || url.includes('goldapple'))) {
     try {
