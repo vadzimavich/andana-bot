@@ -1,11 +1,118 @@
 const axios = require('axios');
 const ogs = require('open-graph-scraper');
 
-if (require.main === module) {
-  extractMeta('https://ozon.by/product/kofe-v-zernah-sibaristica-efiopiya-irgacheff-1-kg-srednyaya-obzharka-876315989/')
-    .then(console.log)
-    .catch(console.error);
+async function parseOzonDirect(url) {
+  try {
+    let finalUrl = url;
+
+    // Шаг 1: Резолвим короткие ссылки типа /t/xxxxx
+    if (url.includes('/t/') || url.includes('ozon.by')) {
+      console.log('🔄 Resolving Ozon redirect...');
+
+      // Следуем за редиректом, чтобы получить полный URL
+      const redirectResponse = await axios.get(url, {
+        maxRedirects: 5,
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      });
+
+      finalUrl = redirectResponse.request.res.responseUrl || url;
+      console.log('📍 Resolved to:', finalUrl);
+    }
+
+    // Шаг 2: Извлекаем slug для API
+    const urlObj = new URL(finalUrl.replace('ozon.by', 'ozon.ru'));
+    let slug = urlObj.pathname;
+
+    // Удаляем trailing slash и параметры
+    slug = slug.replace(/\/$/, '');
+
+    // Шаг 3: Запрашиваем API
+    const apiUrl = `https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=${encodeURIComponent(slug)}`;
+
+    console.log('🔍 Ozon API request:', apiUrl);
+
+    const response = await axios.get(apiUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'ru-RU,ru;q=0.9',
+        'Referer': finalUrl.replace('ozon.by', 'ozon.ru'),
+        'Origin': 'https://www.ozon.ru',
+        'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin'
+      },
+      timeout: 15000
+    });
+
+    const data = response.data;
+
+    // Парсим ответ
+    if (data?.seo?.meta) {
+      const meta = data.seo.meta;
+      let title = '';
+      let image = '';
+
+      meta.forEach(item => {
+        if (item.property === 'og:title' && item.content) {
+          title = item.content;
+        }
+        if (item.property === 'og:image' && item.content) {
+          image = item.content;
+        }
+      });
+
+      if (title) {
+        title = title
+          .replace(/ купить.*$/i, '')
+          .replace(/ - OZON.*$/i, '')
+          .replace(/ \| OZON$/i, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .substring(0, 150);
+
+        console.log('✅ Ozon Success:', title);
+        return { title, image: image || '', url: finalUrl };
+      }
+    }
+
+    // Альтернативный поиск в widgetStates
+    if (data?.widgetStates) {
+      const states = Object.values(data.widgetStates);
+      for (const state of states) {
+        if (typeof state === 'string') {
+          try {
+            const parsed = JSON.parse(state);
+            if (parsed?.title || parsed?.name) {
+              const title = (parsed.title || parsed.name).substring(0, 150);
+              console.log('✅ Ozon widgetStates Success');
+              return {
+                title,
+                image: parsed.image || parsed.mainImage || '',
+                url: finalUrl
+              };
+            }
+          } catch { }
+        }
+      }
+    }
+
+  } catch (e) {
+    console.error('❌ Ozon Direct Error:', e.message);
+    if (e.response) {
+      console.error('Response status:', e.response.status);
+      console.error('Response headers:', e.response.headers);
+    }
+  }
+  return null;
 }
+
 // --- ЛОКАЛЬНЫЙ ПАРСЕР WILDBERRIES ---
 async function parseWildberriesLocal(url) {
   try {

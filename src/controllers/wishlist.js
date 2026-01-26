@@ -42,6 +42,8 @@ module.exports = {
         await ctx.reply(caption, { parse_mode: 'Markdown' });
       }
     } catch (e) {
+      console.error('❌ Full error:', e);
+      console.error('Stack:', e.stack);
       ctx.reply('❌ Ошибка. Попробуй еще раз.');
     }
   },
