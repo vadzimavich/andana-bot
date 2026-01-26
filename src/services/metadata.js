@@ -1,6 +1,7 @@
 const axios = require('axios');
 const ogs = require('open-graph-scraper');
 
+// --- ПАРСЕР OZON ---
 async function parseOzonDirect(url) {
   try {
     let finalUrl = url;
@@ -9,7 +10,6 @@ async function parseOzonDirect(url) {
     if (url.includes('/t/') || url.includes('ozon.by')) {
       console.log('🔄 Resolving Ozon redirect...');
 
-      // Следуем за редиректом, чтобы получить полный URL
       const redirectResponse = await axios.get(url, {
         maxRedirects: 5,
         validateStatus: (status) => status >= 200 && status < 400,
@@ -25,8 +25,6 @@ async function parseOzonDirect(url) {
     // Шаг 2: Извлекаем slug для API
     const urlObj = new URL(finalUrl.replace('ozon.by', 'ozon.ru'));
     let slug = urlObj.pathname;
-
-    // Удаляем trailing slash и параметры
     slug = slug.replace(/\/$/, '');
 
     // Шаг 3: Запрашиваем API
@@ -122,7 +120,6 @@ async function parseWildberriesLocal(url) {
     const vol = Math.floor(id / 100000);
     const part = Math.floor(id / 1000);
 
-    // Перебираем корзины 01-35
     const requests = [];
     for (let i = 1; i <= 35; i++) {
       const host = i < 10 ? `0${i}` : i;
@@ -164,7 +161,7 @@ async function extractMeta(url) {
     }
   }
 
-  // 1. OZON
+  // 2. OZON (Прямой метод + Fallback на GAS)
   if (url.includes('ozon')) {
     const ozonData = await parseOzonDirect(url);
     if (ozonData) return ozonData;
@@ -190,7 +187,7 @@ async function extractMeta(url) {
     }
   }
 
-  // 2. ALIEXPRESS (Твой рабочий код)
+  // 3. ALIEXPRESS
   if (url.includes('ali')) {
     try {
       console.log('🔄 Using Open Graph Scraper for Ali...');
@@ -230,14 +227,18 @@ async function extractMeta(url) {
     }
   }
 
-  // 3. LAMODA / ONLINER / 21VEK (Локально через OGS)
+  // 4. LAMODA / ONLINER / 21VEK
   if (url.includes('lamoda') || url.includes('onliner') || url.includes('21vek')) {
     try {
       console.log('🌍 Using local OGS for General sites...');
       const options = {
         url: url,
         timeout: 10000,
-        fetchOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' } }
+        fetchOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+          }
+        }
       };
       const { result } = await ogs(options);
       if (result.ogTitle) {
@@ -253,18 +254,18 @@ async function extractMeta(url) {
     }
   }
 
-  // 4. GOLD APPLE (Только они летят в Google)
+  // 5. GOLD APPLE (только через GAS)
   const gasUrl = process.env.GAS_PARSER_URL;
-  if (gasUrl && (url.includes('ozon') || url.includes('goldapple'))) {
+  if (gasUrl && url.includes('goldapple')) {
     try {
-      console.log('🚀 Delegating to Google (Ozon/GA)...');
+      console.log('🚀 Delegating to Google (GoldApple)...');
       const cleanUrl = url.split('?')[0];
       const { data } = await axios.get(gasUrl, {
         params: { url: cleanUrl },
         timeout: 30000
       });
 
-      if (data && data.title && !data.title.includes('Error')) {
+      if (data?.title && !data.title.includes('Error')) {
         console.log('✅ Google Success:', data.title);
         return { title: data.title, image: data.image || '', url: url };
       }
