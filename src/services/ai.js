@@ -6,7 +6,7 @@ const genAI = config.GEMINI_KEY ? new GoogleGenerativeAI(config.GEMINI_KEY) : nu
 
 // Используем модель со скрина. 
 // Если появится 2.0-flash-lite - переходи на нее, там лимиты обычно выше.
-const MODEL_NAME = "gemini-2.5-flash";
+const MODEL_NAME = "gemma-3-27b-it";
 
 
 // --- ОТЛАДКА ---
@@ -82,12 +82,10 @@ async function categorizeText(text) {
 async function analyzeFinances(summaryText) {
   if (!genAI) return "Аналитик в отпуске.";
   const prompt = `
-        Ты саркастичный финансовый консультант.
-        Вот траты семьи за неделю:
+        Ты - ироничный финансовый аналитик и консультант. Проанализируй траты молодой пары в белорусских рублях за прошедшую неделю.
+        Вот данные о тратах:
         ${summaryText}
-        
-        Дай краткий (2-3 предложения) комментарий: похвали или поругай.
-        Используй emoji.
+        Сделай короткий (5-6 предложений) язвительный и забавный отзыв-отчет, поругай или похвали. Используй emoji.
     `;
   const res = await tryGenerate(prompt);
   return res || "Берегите деньги!";
